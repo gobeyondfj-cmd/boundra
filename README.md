@@ -1,5 +1,7 @@
 # Boundra · Payment approval gateway for AI agents
 
+<!-- mcp-name: io.github.gobeyondfj-cmd/boundra -->
+
 > **Boundra** (boundra.io) — *Boundaries for agent payments.*
 > The boundary layer for agent payments: before any money moves, answer
 > "should this payment happen at all?"
