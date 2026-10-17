@@ -42,9 +42,9 @@ def compile_policy(nl_rule: str) -> Policy:
     p = Policy(raw_mandate=nl_rule)
 
     m = re.search(r"单笔[^0-9]{0,6}" + _NUM, nl_rule)
-    if not m:   # English: "max $10 per transaction" / "$10 per payment"
+    if not m:   # English: "max $10 per transaction" / "max 200 dollars per payment"
         m = re.search(r"(?:max(?:imum)?\s*)?\$?" + _NUM +
-                      r"\s*(?:USD\s*)?per\s+(?:transaction|payment|tx)", nl_rule, re.I)
+                      r"\s*(?:(?:USD|dollars?)\s*)?per\s+(?:transaction|payment|tx)", nl_rule, re.I)
     if m:
         p.per_tx_max = float(m.group(1))
 
