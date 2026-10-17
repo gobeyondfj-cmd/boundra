@@ -64,14 +64,14 @@ class Gateway:
                 if scope == "agent" and not agent_id:
                     continue
                 if self.store.is_revoked(owner, scope, aid):
-                    raise PermissionError(f"策略 {scope}/{aid or 'all'} 已被用户撤销，默认拒绝")
+                    raise PermissionError(f"policy {scope}/{aid or 'all'} revoked by the user — default-deny")
                 doc = self.store.active(owner, scope, aid)
                 if not doc:
                     continue
                 problems = self.store.check_integrity(doc)
                 if problems:
-                    raise PermissionError(f"策略 {scope}/v{doc.version} 完整性校验失败："
-                                          f"{'、'.join(problems)}。拒绝基于不可信策略放行。")
+                    raise PermissionError(f"policy {scope}/v{doc.version} integrity check failed: "
+                                          f"{'; '.join(problems)}. Refusing to act on an untrusted policy.")
                 policies.append(doc.to_policy())
                 refs.append({"scope": scope, "version": doc.version, "hash": doc.hash})
         if not policies and self.legacy_policy:
@@ -117,14 +117,14 @@ class Gateway:
                                   [], spent, today)
         if not policies:
             d = Decision("DENY", layer="policy",
-                         reasons=["没有找到任何（已签名的）策略，默认拒绝"])
+                         reasons=["no (signed) policy found — default-deny"])
             return self._finalize(d, "DENY", None, intent, agent_id, owner,
                                   [], spent, today)
 
         decisions = [evaluate(p, intent, spent) for p in policies]
         decision = max(decisions, key=lambda d: _SEVERITY[d.action])
         if len(decisions) > 1:
-            decision.reasons.append(f"（已叠加 {len(decisions)} 层策略，取最严）")
+            decision.reasons.append(f"(stacked {len(decisions)} policy layers, strictest wins)")
 
         # 第 3 层：任务 Mandate（可选，单次消费）
         mandate_id = None
@@ -132,13 +132,13 @@ class Gateway:
             m = Mandate(**mandate)
             ok, why = verify_mandate(m)
             if ok and m.mandate_id in self._used_mandates:
-                ok, why = False, "Mandate 已被使用（单次授权，用完即焚）"
+                ok, why = False, "mandate already used (single-use authorization)"
             if ok and owner and m.owner.lower() != owner.lower():
-                ok, why = False, "Mandate 的 owner 与本次评估的 owner 不一致"
+                ok, why = False, "mandate owner does not match this evaluation's owner"
             if ok:
                 ok, why = check_against_intent(m, intent_d)
             if not ok:
-                d = Decision("DENY", layer="mandate", reasons=[f"Mandate 校验失败：{why}"])
+                d = Decision("DENY", layer="mandate", reasons=[f"mandate check failed: {why}"])
                 return self._finalize(d, "DENY", None, intent, agent_id, owner,
                                       policy_refs, spent, today)
             mandate_id = m.mandate_id
@@ -154,7 +154,7 @@ class Gateway:
                     final_action, human_said = "ALLOW", "approve(token)"
                 else:
                     final_action = "DENY"
-                    decision.reasons.append(f"批准令牌无效：{why}")
+                    decision.reasons.append(f"invalid approval token: {why}")
             elif human_approved:
                 # legacy 自证模式：仅向后兼容，生产必须废弃
                 final_action, human_said = "ALLOW", "approve(legacy-deprecated)"
@@ -211,5 +211,6 @@ class Gateway:
         p = self.legacy_policy
         if not p:
             return {}
-        return {"单笔上限": p.per_tx_max, "日预算": p.daily_budget,
-                "白名单": p.allowed_recipients, "免确认阈值": p.require_approval_above}
+        return {"per_tx_max": p.per_tx_max, "daily_budget": p.daily_budget,
+                "allowed_recipients": p.allowed_recipients,
+                "require_approval_above": p.require_approval_above}

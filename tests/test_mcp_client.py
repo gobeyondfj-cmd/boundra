@@ -39,9 +39,9 @@ async def main():
             # 从 server 读取当前生效策略，测试用例随策略自适应
             # （policy_rule.txt 存在时白名单是真实商户地址，缺省是域名）
             policy = await call(s, "get_policy")
-            WL = policy["白名单"][0]
-            PER_TX = float(policy["单笔上限"])
-            APPROVE_ABOVE = float(policy["免确认阈值"])
+            WL = policy["allowed_recipients"][0]
+            PER_TX = float(policy["per_tx_max"])
+            APPROVE_ABOVE = float(policy["require_approval_above"])
             print(f"   当前策略：白名单[0]={WL} 单笔上限=${PER_TX}")
 
             print(f"\n① 规则内小额（$1，白名单收款方）→ 期望 ALLOW")
@@ -82,7 +82,7 @@ async def main():
             report = await call(s, "get_spend_report")
             policy = await call(s, "get_policy")
             print(f"   ✔ 今日已花 ${report['spent']} / 预算 ${report['daily_budget']}")
-            print(f"   ✔ 策略：单笔≤${policy['单笔上限']}，白名单 {len(policy['白名单'])} 个")
+            print(f"   ✔ 策略：单笔≤${policy['per_tx_max']}，白名单 {len(policy['allowed_recipients'])} 个")
 
             print("\n⑦ 新增工具：模板渲染 + Agent 预算申请")
             r = await call(s, "render_template", template_id="dev_api_budget",

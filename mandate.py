@@ -72,7 +72,7 @@ def verify_mandate(m: Mandate) -> tuple[bool, str]:
 def check_against_intent(m: Mandate, intent: dict) -> tuple[bool, str]:
     """Mandate 层评估：金额封顶 + 收款方限定（语义匹配由语义层负责）"""
     if intent["amount"] > m.max_amount:
-        return False, f"金额 ${intent['amount']} 超过 Mandate 封顶 ${m.max_amount}"
+        return False, f"amount ${intent['amount']} exceeds mandate cap ${m.max_amount}"
     if m.allowed_recipients and intent["recipient"] not in m.allowed_recipients:
-        return False, f"收款方 {intent['recipient']} 不在 Mandate 限定范围 {m.allowed_recipients}"
+        return False, f"recipient {intent['recipient']} is outside mandate scope {m.allowed_recipients}"
     return True, "ok"

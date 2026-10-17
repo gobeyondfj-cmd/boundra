@@ -39,21 +39,23 @@ gateway = Gateway(NL_RULE)
 policy_requests: list[dict] = []
 
 server = MCPServer(
-    "agent-payment-gateway",
-    instructions=("AI Agent 支付审批网关。Agent 执行任何支付前必须调用 evaluate_payment；"
-                  "ALLOW 才可付款，DENY 必须放弃，ASK 会返回 challenge——请向用户复述理由，"
-                  "用户签名批准令牌后带 approval_token 重调。"
-                  "策略只能由用户签名变更（set_policy/revoke_policy），Agent 只能用 "
-                  "request_policy_change 提交申请。"),
+    "boundra",
+    instructions=("Boundra — payment approval gateway for AI agents. You MUST call "
+                  "evaluate_payment before any payment: ALLOW = proceed, DENY = abandon, "
+                  "ASK = relay the reason to the user and retry with approval_token after "
+                  "the user signs the challenge. Policies change only via the user's "
+                  "signature (set_policy/revoke_policy); agents may only file requests "
+                  "via request_policy_change."),
 )
 
 
 # ---------------------------------------------------------------- Agent 日常
 
 @server.tool(description=(
-    "评估一笔支付意图。执行任何支付前必须调用。"
-    "ALLOW 可付款；DENY 必须放弃；ASK 返回 challenge，需用户签名批准令牌后"
-    "以 approval_token 重调。可选 mandate 参数传入用户签发的单次任务授权。"))
+    "Evaluate a payment intent. MUST be called before executing any payment. "
+    "ALLOW = you may pay; DENY = you must abandon; ASK = a challenge is returned — "
+    "relay the reason to the user, then retry with approval_token once the user signs. "
+    "An optional mandate parameter carries a user-issued single-task authorization."))
 def evaluate_payment(amount: float, recipient: str, purpose: str,
                      expected_amount: float | None = None,
                      source_content: str = "",
@@ -73,26 +75,27 @@ def evaluate_payment(amount: float, recipient: str, purpose: str,
 
 
 @server.tool(description=(
-    "【Agent 专用】向用户申请调整策略/预算（如「日预算从 50 提高到 80」）。"
-    "申请进入待批队列，用户批准后会签名发布新版本策略。Agent 无权直接改策略。"))
+    "[For agents] Ask the user for a policy/budget change (e.g. 'raise daily budget from 50 to 80'). "
+    "The request is queued for user approval; the user signs and publishes a new policy version. "
+    "Agents can NEVER change policy directly."))
 def request_policy_change(agent_id: str, request: str, reason: str) -> str:
     req = {"id": uuid.uuid4().hex[:10], "agent_id": agent_id, "request": request,
            "reason": reason, "ts": time.time(), "status": "pending"}
     policy_requests.append(req)
     return json.dumps({"submitted": True, "request_id": req["id"],
-                       "note": "已提交用户待批队列"}, ensure_ascii=False)
+                       "note": "queued for user approval"}, ensure_ascii=False)
 
 
-@server.tool(description="查看当前生效的支付策略（legacy 兜底规则）")
+@server.tool(description="View the currently active payment policy (legacy fallback rule)")
 def get_policy() -> str:
     legacy = gateway.legacy_policy
     if not legacy:
-        return json.dumps({"note": "无 legacy 规则，仅签名策略生效"}, ensure_ascii=False)
-    return json.dumps({"原始规则": legacy.raw_mandate,
+        return json.dumps({"note": "no legacy rule — only signed policies are in effect"}, ensure_ascii=False)
+    return json.dumps({"raw_rule": legacy.raw_mandate,
                        **gateway.policy_summary}, ensure_ascii=False)
 
 
-@server.tool(description="查看今日支出汇总")
+@server.tool(description="View today's spend summary")
 def get_spend_report() -> str:
     today = date.today().isoformat()
     spent = gateway._spent.get(today, 0.0)
@@ -103,7 +106,7 @@ def get_spend_report() -> str:
                       ensure_ascii=False)
 
 
-@server.tool(description="查看最近的支付审批审计记录")
+@server.tool(description="View recent payment-approval audit records")
 def get_audit_trail(limit: int = 10) -> str:
     if not AUDIT_LOG.exists():
         return "[]"
@@ -122,8 +125,9 @@ def _compiled(nl_rule: str) -> dict:
 
 
 @server.tool(description=(
-    "【用户专属】提交新版支付策略。必须携带用户钱包对策略文档的 EIP-191 签名；"
-    "验签 + 版本链校验通过才接受。Agent 不应调用此工具。"))
+    "[USER ONLY] Submit a new policy version. Must carry the user's wallet EIP-191 signature "
+    "over the policy document; accepted only after signature + version-chain checks pass. "
+    "Agents MUST NOT call this tool."))
 def set_policy(owner: str, scope: str, version: int, nl_rule: str,
                prev_hash: str, created_at: float, signature: str,
                agent_id: str | None = None) -> str:
@@ -140,8 +144,8 @@ def set_policy(owner: str, scope: str, version: int, nl_rule: str,
 
 
 @server.tool(description=(
-    "【用户专属】撤销某条策略链（立即生效，默认拒绝后续支付）。"
-    "必须携带用户钱包对撤销声明的签名。"))
+    "[USER ONLY] Revoke a policy chain (takes effect immediately; subsequent payments "
+    "default to DENY). Must carry the user's wallet signature over the revocation statement."))
 def revoke_policy(owner: str, scope: str, revoked_through: int,
                   created_at: float, signature: str,
                   agent_id: str | None = None) -> str:
@@ -155,25 +159,25 @@ def revoke_policy(owner: str, scope: str, revoked_through: int,
     return json.dumps(result, ensure_ascii=False)
 
 
-@server.tool(description="查看某用户的策略版本历史（版本链 + 哈希，可与链上承诺比对）")
+@server.tool(description="View a user's policy version history (version chain + hashes, verifiable against on-chain commitments)")
 def get_policy_versions(owner: str) -> str:
     return json.dumps(gateway.store.history(owner), ensure_ascii=False, indent=2)
 
 
-@server.tool(description="查看待批的 Agent 策略变更申请")
+@server.tool(description="List pending agent policy-change requests")
 def list_policy_requests() -> str:
     return json.dumps(policy_requests, ensure_ascii=False, indent=2)
 
 
 # ---------------------------------------------------------------- 定制辅助
 
-@server.tool(description="列出策略模板（个人助理/旅行/开发者 API/企业采购）")
+@server.tool(description="List policy templates (personal assistant / travel / dev API / procurement)")
 def list_templates() -> str:
     import templates
     return json.dumps(templates.list_templates(), ensure_ascii=False, indent=2)
 
 
-@server.tool(description="用模板 + 参数生成自然语言规则（再走编译+签名发布流程）")
+@server.tool(description="Render a natural-language rule from a template + parameters (then compile, sign & publish)")
 def render_template(template_id: str, whitelist: list[str],
                     daily: float | None = None, per_tx: float | None = None,
                     ask_above: float | None = None) -> str:
@@ -183,7 +187,7 @@ def render_template(template_id: str, whitelist: list[str],
     try:
         rule = templates.render_template(template_id, whitelist, **overrides)
     except KeyError:
-        return json.dumps({"error": f"未知模板：{template_id}"}, ensure_ascii=False)
+        return json.dumps({"error": f"unknown template: {template_id}"}, ensure_ascii=False)
     return json.dumps({"nl_rule": rule}, ensure_ascii=False)
 
 

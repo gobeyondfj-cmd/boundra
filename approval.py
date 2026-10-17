@@ -53,17 +53,17 @@ def verify_approval(token: str, intent: dict, owner: str,
         signer = Account.recover_message(
             encode_defunct(text=_canonical(ch)), signature=sig)
     except Exception:
-        return False, "令牌格式非法"
+        return False, "invalid token format"
     if signer.lower() != owner.lower():
-        return False, f"签名者 {signer} 不是策略 owner"
+        return False, f"signer {signer} is not the policy owner"
     if time.time() > ch.get("exp", 0):
-        return False, "令牌已过期"
+        return False, "approval token expired"
     if ch["nonce"] in challenges_seen:
-        return False, "令牌已被使用（防重放）"
+        return False, "token already used (replay protection)"
     want = ch.get("intent", {})
     got = {"amount": intent["amount"], "recipient": intent["recipient"],
            "purpose": intent["purpose"]}
     if want != got:
-        return False, f"令牌绑定的意图（{want}）与本次提交（{got}）不一致"
+        return False, f"token-bound intent ({want}) does not match this submission ({got})"
     challenges_seen.add(ch["nonce"])
-    return True, "批准令牌验签通过"
+    return True, "approval token verified"

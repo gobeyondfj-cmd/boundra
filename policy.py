@@ -110,13 +110,14 @@ def semantic_check(policy: Policy, intent: PaymentIntent) -> Optional[Decision]:
             if re.search(pat, intent.source_content, re.IGNORECASE)]
     if hits:
         return Decision("DENY", layer="semantic",
-                        reasons=[f"触发内容含注入特征（{len(hits)} 处）：疑似 prompt injection，"
-                                 f"Agent 意图可能已被外部内容劫持"])
+                        reasons=[f"source content carries injection markers ({len(hits)} hits): "
+                                 f"suspected prompt injection — agent intent may be hijacked"])
     if (intent.expected_amount is not None and intent.expected_amount > 0
             and intent.amount > intent.expected_amount * policy.max_amount_jump_ratio):
         return Decision("DENY", layer="semantic",
-                        reasons=[f"金额 ${intent.amount} 超出授权预期 ${intent.expected_amount} 的 "
-                                 f"{policy.max_amount_jump_ratio} 倍：意图漂移，与原始授权语义不符"])
+                        reasons=[f"amount ${intent.amount} jumps beyond {policy.max_amount_jump_ratio}x "
+                                 f"the expected ${intent.expected_amount}: intent drift from the "
+                                 f"original authorization"])
     return None
 
 
@@ -131,26 +132,26 @@ def evaluate(policy: Policy, intent: PaymentIntent, spent_today: float) -> Decis
     # 第 2 层：收款方白名单（未知商户不直接拒，转人工）
     if policy.allowed_recipients and intent.recipient not in policy.allowed_recipients:
         return Decision("ASK", layer="whitelist",
-                        reasons=[f"收款方 {intent.recipient} 不在白名单内，需人工确认"])
+                        reasons=[f"recipient {intent.recipient} is not on the whitelist — human confirmation required"])
 
     # 第 3 层：单笔限额
     if intent.amount > policy.per_tx_max:
         return Decision("DENY", layer="limit",
-                        reasons=[f"单笔 ${intent.amount} 超过单笔上限 ${policy.per_tx_max}"])
+                        reasons=[f"amount ${intent.amount} exceeds the per-transaction cap ${policy.per_tx_max}"])
 
     # 第 4 层：日预算
     if spent_today + intent.amount > policy.daily_budget:
         return Decision("DENY", layer="budget",
-                        reasons=[f"本笔将使用今日支出达 ${spent_today + intent.amount:.2f}，"
-                                 f"超过日预算 ${policy.daily_budget}"])
+                        reasons=[f"this payment would push today's spend to ${spent_today + intent.amount:.2f}, "
+                                 f"beyond the daily budget ${policy.daily_budget}"])
 
     # 第 5 层：分级审批（规则内但高于阈值 → 转人工）
     if intent.amount > policy.require_approval_above:
         return Decision("ASK", layer="approval",
-                        reasons=[f"金额 ${intent.amount} 超过免确认阈值 "
-                                 f"${policy.require_approval_above}，需人工确认"])
+                        reasons=[f"amount ${intent.amount} is above the auto-approve threshold "
+                                 f"${policy.require_approval_above} — human confirmation required"])
 
-    return Decision("ALLOW", layer="pass", reasons=["规则内，自动放行"])
+    return Decision("ALLOW", layer="pass", reasons=["within policy — auto-approved"])
 
 
 # ---------------------------------------------------------------- 平台红线（第 0 层）

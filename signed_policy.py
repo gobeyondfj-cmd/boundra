@@ -174,17 +174,17 @@ class PolicyStore:
 
     def submit(self, doc: PolicyDocument) -> PolicyDocument:
         if not doc.signature:
-            raise PermissionError("策略缺少用户签名，拒绝接受")
+            raise PermissionError("policy is missing the user's signature — rejected")
         if not verify_signature(doc):
             raise PermissionError(
-                f"签名者不是策略 owner（{doc.owner}）：策略变更必须用户本人密钥签名")
+                f"signer is not the policy owner ({doc.owner}): policy changes must be signed by the owner's key")
         chain = self.chains.setdefault(self._key(doc.owner, doc.scope, doc.agent_id), [])
         expected_ver = (chain[-1].version + 1) if chain else 1
         expected_prev = chain[-1].hash if chain else doc.prev_hash
         if doc.version != expected_ver:
-            raise ValueError(f"版本号应为 {expected_ver}，收到 {doc.version}")
+            raise ValueError(f"expected version {expected_ver}, got {doc.version}")
         if chain and doc.prev_hash != expected_prev:
-            raise ValueError("prev_hash 与链上最新版本不匹配：版本链断裂")
+            raise ValueError("prev_hash does not match the latest version on-chain: version chain broken")
         doc.finalize()
         chain.append(doc)
         self.anchor.anchor(doc.owner, doc.version, doc.hash)   # 链上承诺（模拟）
@@ -202,9 +202,9 @@ class PolicyStore:
     def revoke(self, rec: "Revocation"):
         """撤销某条策略链（含已锚定的所有历史版本）。签名者必须 == owner。"""
         if not rec.signature:
-            raise PermissionError("撤销请求缺少用户签名")
+            raise PermissionError("revocation request is missing the user's signature")
         if not rec.verify():
-            raise PermissionError("撤销签名者不是策略 owner")
+            raise PermissionError("revocation signer is not the policy owner")
         key = self._key(rec.owner, rec.scope, rec.agent_id)
         self.revocations[key] = max(rec.revoked_through,
                                     self.revocations.get(key, 0))
@@ -219,10 +219,10 @@ class PolicyStore:
         """每次评估前的体检：签名仍有效 + 承诺已锚定 + 哈希未变"""
         problems = []
         if not verify_signature(doc):
-            problems.append("签名验证失败")
+            problems.append("signature verification failed")
         doc.finalize()
         if not self.anchor.is_anchored(doc.owner, doc.version, doc.hash):
-            problems.append(f"v{doc.version} 的哈希未在锚定日志中找到（可能被篡改）")
+            problems.append(f"hash of v{doc.version} not found in the anchor log (possible tampering)")
         return problems
 
     def history(self, owner: str) -> list[dict]:
