@@ -1,0 +1,21 @@
+# 密钥与本地状态 —— 绝不入库
+wallets*.json
+*.key
+policy_rule.txt
+state/
+.env
+
+# 货币化引擎与部署配置已迁至私有仓库 boundra-ops —— 防止误加回
+paid_gateway_server.py
+demo_monetization.py
+Dockerfile
+fly.toml
+requirements.txt
+
+# 构建产物
+.venv/
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.pyc

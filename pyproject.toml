@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "boundra-mcp"
+version = "0.1.0"
+description = "Boundra — policy-guarded payment approval gateway for AI agents (MCP server)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Boundra" }]
+keywords = ["mcp", "agent", "payments", "x402", "policy", "guardrails"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+]
+dependencies = [
+    "mcp>=2.3,<3",
+    "eth-account>=0.13",
+]
+
+[project.urls]
+Homepage = "https://boundra.io"
+API = "https://api.boundra.io"
+
+[project.scripts]
+boundra-mcp = "mcp_server:main"
+boundra-init = "boundra_cli:init_main"
+boundra-approve = "boundra_cli:approve_main"
+
+[tool.setuptools]
+# 单一事实来源：直接以顶层模块形式打包 prototype 中的核心文件，
+# 不做 vendor 复制，避免与测试基线用的代码发生分叉。
+py-modules = [
+    "mcp_server",
+    "boundra_cli",
+    "gateway",
+    "policy",
+    "signed_policy",
+    "approval",
+    "mandate",
+    "templates",
+    "chain_anchor",
+]
