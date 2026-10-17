@@ -1,40 +1,46 @@
 # -*- coding: utf-8 -*-
 """
-templates.py — 策略模板库：进阶用户的"模板+滑块"定制方式
+templates.py — policy template library: the "template + sliders" customization
+path for advanced users.
 
-普通用户用自然语言，开发者/企业用 DSL，中间地带用模板：
-选模板 → 调参数 → 生成自然语言规则 → 走统一的编译 + 签名发布流程。
+Casual users write natural language; developers/enterprises use a DSL; the
+middle ground picks a template → tunes parameters → generates a natural-language
+rule → goes through the same compile + sign + publish pipeline.
 """
 from __future__ import annotations
 
 TEMPLATES = {
     "personal_assistant": {
-        "name": "个人助理 Agent",
-        "desc": "日常小额消费：严格白名单 + 低单笔上限 + 中额转人工",
+        "name": "Personal Assistant Agent",
+        "desc": "everyday small purchases: strict whitelist + low per-tx cap + mid-range human approval",
         "params": {"daily": 50, "per_tx": 10, "ask_above": 5},
-        "rule": "每天开销不超过 {daily} 美元，单笔不超过 {per_tx} 美元；"
-                "只允许付给白名单服务商（{whitelist}）；超过 {ask_above} 美元要我手机确认",
+        "rule": "Daily spend cap {daily} dollars, max {per_tx} dollars per transaction; "
+                "only pay whitelisted providers ({whitelist}); "
+                "any payment above {ask_above} dollars requires my approval",
     },
     "travel_agent": {
-        "name": "旅行 Agent",
-        "desc": "机酒预订：限定旅行类商户，大额必须人工",
+        "name": "Travel Agent",
+        "desc": "flights & hotels: travel merchants only, large amounts always need a human",
         "params": {"daily": 300, "per_tx": 200, "ask_above": 50},
-        "rule": "每天开销不超过 {daily} 美元，单笔不超过 {per_tx} 美元；"
-                "只允许付给白名单服务商（{whitelist}）；超过 {ask_above} 美元要我手机确认",
+        "rule": "Daily spend cap {daily} dollars, max {per_tx} dollars per transaction; "
+                "only pay whitelisted providers ({whitelist}); "
+                "any payment above {ask_above} dollars requires my approval",
     },
     "dev_api_budget": {
-        "name": "开发者 API 消费",
-        "desc": "Agent 自主调付费 API：高频小额，免确认阈值可放宽",
+        "name": "Developer API Spend",
+        "desc": "agent calls paid APIs autonomously: high-frequency small amounts, relaxed approval threshold",
         "params": {"daily": 100, "per_tx": 5, "ask_above": 20},
-        "rule": "每天 API 开销不超过 {daily} 美元，单笔不超过 {per_tx} 美元；"
-                "只允许付给白名单服务商（{whitelist}）；超过 {ask_above} 美元要我手机确认",
+        "rule": "Daily API spend cap {daily} dollars, max {per_tx} dollars per transaction; "
+                "only pay whitelisted providers ({whitelist}); "
+                "any payment above {ask_above} dollars requires my approval",
     },
     "procurement": {
-        "name": "企业采购 Agent",
-        "desc": "B2B 采购：高额度 + 极低免确认阈值，几乎笔笔审批",
+        "name": "Enterprise Procurement Agent",
+        "desc": "B2B purchasing: high ceilings + very low auto-approve threshold, nearly every payment reviewed",
         "params": {"daily": 5000, "per_tx": 1000, "ask_above": 100},
-        "rule": "每天采购开销不超过 {daily} 美元，单笔不超过 {per_tx} 美元；"
-                "只允许付给白名单供应商（{whitelist}）；超过 {ask_above} 美元要我审批",
+        "rule": "Daily procurement spend cap {daily} dollars, max {per_tx} dollars per transaction; "
+                "only pay whitelisted suppliers ({whitelist}); "
+                "any payment above {ask_above} dollars requires my approval",
     },
 }
 
@@ -45,7 +51,7 @@ def list_templates() -> list[dict]:
 
 
 def render_template(template_id: str, whitelist: list[str], **overrides) -> str:
-    """模板 + 参数 → 自然语言规则（进入统一编译管线）"""
+    """template + parameters → natural-language rule (enters the shared compile pipeline)"""
     t = TEMPLATES[template_id]
     params = {**t["params"], **overrides}
     return t["rule"].format(whitelist=", ".join(whitelist), **params)
