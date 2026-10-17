@@ -15,7 +15,7 @@ Two run modes:
 
 - **Offline simulation** (`demo.py`): stdlib only, self-contained mock merchant
   and wallets, zero dependencies, zero network
-- **Real protocol** (`demo_real.py`): standard MCP server + real x402 SDK +
+- **Real protocol** (`demo/demo_real.py`): standard MCP server + real x402 SDK +
   Base Sepolia testnet
 
 ## Data flow
@@ -130,7 +130,7 @@ user private key signature ──→ PolicyDocument (NL rule + compiled artifact
 
 - **Read-only for agents**: without the user's private key, `set_policy` always
   fails — impersonation, unsigned, and tampered submissions are all blocked
-  (seven scenarios in `demo_policy.py`)
+  (seven scenarios in `demo/demo_policy.py`)
 - **Two stacked scopes**: user-level (rules for all agents) × agent-level
   (per-agent rules); the strictest verdict wins
 - **Every version bump is a signature**: v2 must reference v1's hash; tampering
@@ -184,7 +184,7 @@ produce a signed approval token.
    `approve(legacy-deprecated)`.
 2. **MCP-level interception is advisory** — an agent framework can bypass the
    gateway and talk to the wallet directly. Mitigation: pair with x402's
-   native hook (demonstrated in `demo_real.py`; the hook fires inside the SDK,
+   native hook (demonstrated in `demo/demo_real.py`; the hook fires inside the SDK,
    before signing). Endgame: compile the deterministic parts of policy into a
    smart-contract wallet module, enforced at the settlement layer.
 3. **Semantic detection is regex-based** — production should swap in LLM
@@ -204,6 +204,10 @@ Tiered pricing:
 | Semantic evaluation (`/evaluate/semantic`) | 100 free calls per agent; then $0.003 USDC/call (real x402 charge) |
 | Policy anchoring / revocation | Free (revocation is free forever — a safety red line) |
 
+Open core: the client, evaluation engine, and demos in this repo are
+Apache-2.0. The hosted evaluation service (tiered pricing, free-quota
+accounting, revenue ledger) runs from the private `boundra-ops` repo.
+
 ## Verified / not yet verified
 
 **Verified** (all of `test_product.py` 22 assertions + `test_mcp_client.py` pass):
@@ -216,6 +220,8 @@ tools over the wire; gateway blocks an injection attack inside the real x402
 Sepolia (2026-10-16): free tier passes, paid tier settles $0.003 USDC for real
 (buyer 20.000 → 19.997, platform address credited 0.003), dogfood hook
 self-evaluates, semantic layer blocks the injection, `/revenue` ledger entry.
+The settlement tx is publicly verifiable: [`0x5ad8ef4b…c474bbe`](https://sepolia.basescan.org/tx/0x5ad8ef4b4d6eef7ba34e718742068f8e8480336c12032a3a85801b101c474bbe)
+(the hosted service code is closed by design — the chain is the receipt).
 
 **Not yet verified**: real on-chain anchoring (contract ready, needs test ETH
 to deploy); real user demand; semantic layer false-positive rate under real
