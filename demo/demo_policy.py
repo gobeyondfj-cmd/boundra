@@ -19,13 +19,13 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from eth_account import Account
 from gateway import Gateway
 from signed_policy import ANCHOR_LOG, LocalAnchor, PolicyStore, new_document, sign_document
 
-HERE = Path(__file__).parent
+HERE = Path(__file__).parent.parent
 GENESIS = "0" * 64
 TRAVEL_AGENT = "travel-agent-0x7a9f"
 

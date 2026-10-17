@@ -1,4 +1,4 @@
-# Boundra · Payment approval gateway for AI agents (prototype)
+# Boundra · Payment approval gateway for AI agents
 
 > **Boundra** (boundra.io) — *Boundaries for agent payments.*
 > The boundary layer for agent payments: before any money moves, answer
@@ -20,7 +20,7 @@ Two run modes:
 
 ## Data flow
 
-![Boundra data flow](dataflow.png)
+![Boundra data flow](docs/dataflow.png)
 
 Policies and keys stay with the user; the gateway is read-only; only hash
 commitments go on-chain. Revocation is free — forever, no exceptions.
@@ -35,7 +35,7 @@ curl -X POST https://api.boundra.io/evaluate/basic \
 # → {"decision":"ALLOW",...}  ·  semantic layer: 100 free calls per agent, then $0.003 via x402
 
 # 2. Local end-to-end simulation — a data-procurement agent's day
-.venv/bin/python simulate_agent.py
+.venv/bin/python demo/simulate_agent.py
 # signed policy publish → ALLOW / DENY (limit) / ASK → user-signed approval token
 # → prompt-injection blocked → audit trail, plus a dogfood call to api.boundra.io
 
@@ -48,17 +48,17 @@ uvx --from git+https://github.com/gobeyondfj-cmd/boundra boundra-approve # sign 
 ## Quick start (from source)
 
 ```bash
-cd prototype
+cd boundra
 
 # Mode 1: offline simulation (run this first — the full flow in 30 seconds)
-python demo.py
+python demo/demo.py
 
 # Mode 2: real x402 + MCP
 python -m venv .venv && .venv/bin/pip install \
     "x402[evm,httpx]" mcp eth-account fastapi uvicorn
-.venv/bin/python test_mcp_client.py    # MCP protocol-level tests
-.venv/bin/python setup_wallets.py      # generate Base Sepolia test wallets + faucet guide
-.venv/bin/python demo_real.py          # real protocol end-to-end (settles on-chain after funding)
+.venv/bin/python tests/test_mcp_client.py    # MCP protocol-level tests
+.venv/bin/python demo/setup_wallets.py       # generate Base Sepolia test wallets + faucet guide
+.venv/bin/python demo/demo_real.py           # real protocol end-to-end (settles on-chain after funding)
 ```
 
 ## Architecture: where the gateway stands
@@ -83,28 +83,34 @@ the wedge.
 ## File map
 
 ```
-prototype/
+boundra/
 ├── policy.py                 intent compilation (NL→Policy, bilingual CN/EN) + 5-stage pipeline + platform red lines
 ├── signed_policy.py          ★ signed policy documents + version chain + revocation (keccak)
 ├── approval.py               ★ signed approval tokens (challenge → user signs → gateway verifies)
 ├── mandate.py                ★ task Mandates: single-use authorization, burned after use (pipeline layer 4)
 ├── templates.py              ★ policy template library (personal assistant / travel / dev API / procurement)
 ├── chain_anchor.py           ★ anchor backends: local simulation + real Base Sepolia (web3)
-├── contracts/PolicyAnchor.sol ★ on-chain commitment contract (owner-write, anyone-read)
 ├── gateway.py                gateway core v3: 4-layer stacking + token verification + Mandate + revocation
 ├── rail_adapters.py          ★ rail adapter layer: evaluation core decoupled from settlement rails (x402 first)
 ├── mcp_server.py             ★ standard MCP server (11 tools, stdio)
 ├── boundra_cli.py            ★ boundra-init (policy wizard) + boundra-approve (challenge signer)
-├── simulate_agent.py         ★ end-to-end user journey simulation (MCP + hosted API dogfood)
-├── test_product.py           ★ product tests (22 assertions)
-├── test_mcp_client.py        MCP protocol-level tests
-├── demo_policy.py            signed-policy demo (impersonation / unsigned / tampering attacks all blocked)
-├── x402_resource_server.py   ★ real x402 paywall server (FastAPI middleware)
-├── x402_buyer.py             ★ real x402 buyer, evaluated by the MCP gateway before signing
-├── demo_real.py              real-protocol end-to-end orchestration
-├── setup_wallets.py          Base Sepolia test wallet generation
-├── render_*.py               diagram renderers (architecture / flow / use-case / data flow)
-└── state/audit.jsonl         audit trail (generated at runtime)
+├── contracts/
+│   └── PolicyAnchor.sol      ★ on-chain commitment contract (owner-write, anyone-read)
+├── demo/
+│   ├── simulate_agent.py     ★ end-to-end user journey simulation (MCP + hosted API dogfood)
+│   ├── demo_policy.py        signed-policy demo (impersonation / unsigned / tampering attacks all blocked)
+│   ├── demo_real.py          real-protocol end-to-end orchestration
+│   ├── x402_resource_server.py  real x402 paywall server (FastAPI middleware)
+│   ├── x402_buyer.py         real x402 buyer, evaluated by the MCP gateway before signing
+│   ├── setup_wallets.py      Base Sepolia test wallet generation
+│   └── demo.py / merchant.py / agent.py   offline simulation (zero dependencies)
+├── tests/
+│   ├── test_product.py       ★ product tests (22 assertions)
+│   └── test_mcp_client.py    MCP protocol-level tests
+├── docs/
+│   ├── dataflow.png          data-flow diagram (English)
+│   └── render_*.py           diagram renderers (architecture / flow / use-case / data flow)
+└── state/audit.jsonl         audit trail (generated at runtime, gitignored)
 ```
 
 ## Signed policies: the root of trust is the user's key, not the gateway's database (v2)
@@ -132,7 +138,7 @@ user private key signature ──→ PolicyDocument (NL rule + compiled artifact
 - **Privacy shape**: only hash commitments go on-chain; policy plaintext never
   leaves the device unless the user chooses to disclose
 
-Run: `.venv/bin/python demo_policy.py`
+Run: `.venv/bin/python demo/demo_policy.py`
 
 ## MCP server tools
 

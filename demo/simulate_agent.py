@@ -24,11 +24,11 @@ from eth_account import Account
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from approval import sign_approval                       # 用户手机端签名
 from signed_policy import new_document, sign_document    # 用户钱包端签发策略
 
-HERE = Path(__file__).parent
+HERE = Path(__file__).parent.parent
 GENESIS = "0" * 64
 AGENT_ID = "databot-procurement-01"
 CLOUD_API = "https://api.boundra.io/evaluate/basic"

@@ -13,7 +13,7 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from approval import sign_approval
 from eth_account import Account
@@ -22,7 +22,7 @@ from mandate import new_mandate, sign_mandate
 from signed_policy import (LocalAnchor, PolicyStore, Revocation, new_document,
                            sign_document)
 
-HERE = Path(__file__).parent
+HERE = Path(__file__).parent.parent
 GENESIS = "0" * 64
 AGENT = "travel-agent-01"
 

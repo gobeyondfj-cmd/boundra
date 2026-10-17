@@ -23,9 +23,10 @@ from x402.http.clients.httpx import wrapHttpxWithPayment
 from x402.mechanisms.evm.exact.register import register_exact_evm_client
 from x402.mechanisms.evm.signers import EthAccountSigner
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from rail_adapters import X402Adapter
 
-HERE = Path(__file__).parent
+HERE = Path(__file__).parent.parent
 NETWORK = "eip155:84532"
 
 

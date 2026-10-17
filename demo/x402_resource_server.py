@@ -17,7 +17,7 @@ from x402.http.middleware.fastapi import payment_middleware
 from x402.http.types import PaymentOption, RouteConfig
 from x402.mechanisms.evm.exact.register import register_exact_evm_server
 
-HERE = Path(__file__).parent
+HERE = Path(__file__).parent.parent
 NETWORK = "eip155:84532"   # Base Sepolia
 PRICE = "$0.01"
 

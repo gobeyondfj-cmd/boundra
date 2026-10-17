@@ -15,7 +15,7 @@ from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-HERE = Path(__file__).parent
+HERE = Path(__file__).parent.parent
 
 
 async def call(s: ClientSession, tool: str, **args):

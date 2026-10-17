@@ -19,6 +19,7 @@ import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).parent
+ROOT = Path(__file__).parent.parent
 BASE = "http://127.0.0.1:8402"
 
 
@@ -27,7 +28,7 @@ def hr(t):
 
 
 def ensure_wallets() -> dict | None:
-    f = HERE / "wallets.testnet.json"
+    f = ROOT / "wallets.testnet.json"
     if not f.exists():
         subprocess.run([sys.executable, "setup_wallets.py"], cwd=HERE)
         return None

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from eth_account import Account
 
-WALLETS_FILE = Path(__file__).parent / "wallets.testnet.json"
+WALLETS_FILE = Path(__file__).parent.parent / "wallets.testnet.json"
 
 
 def main():
