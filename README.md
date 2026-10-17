@@ -45,6 +45,70 @@ uvx --from git+https://github.com/gobeyondfj-cmd/boundra boundra-init    # walle
 uvx --from git+https://github.com/gobeyondfj-cmd/boundra boundra-approve # sign an ASK challenge
 ```
 
+## The complete flow, step by step
+
+Zero to a signed, enforced policy in ~10 minutes. No accounts, no dashboards —
+your wallet key is your identity.
+
+**0 · Try the hosted API** *(30 seconds, nothing to install)*
+
+```bash
+curl -X POST https://api.boundra.io/evaluate/basic \
+  -H 'Content-Type: application/json' \
+  -d '{"intent":{"amount":0.01,"recipient":"api.weather.com","purpose":"weather data"}}'
+```
+
+**1 · Bind your identity — the wallet is the account**
+
+```bash
+uvx --from git+https://github.com/gobeyondfj-cmd/boundra boundra-init
+```
+
+Creates or imports a Base wallet. No signup, no email — the private key never
+leaves your device, and your address *is* your identity everywhere in the
+system.
+
+**2 · Set your policy**
+
+The wizard offers templates (personal assistant / travel / dev API /
+procurement) or lets you write your own rule in plain English, then compiles
+it and shows you exactly what will be enforced — before anything is signed.
+
+**3 · Sign & publish**
+
+You sign the policy document with your wallet key (EIP-191). It is published
+as a versioned document and a hash commitment is anchored on-chain. From this
+moment the gateway is read-only for every agent — changing the policy without
+your key is impossible.
+
+**4 · Mount the MCP server into your agent**
+
+```json
+{ "mcpServers": { "boundra": { "command": "uvx",
+  "args": ["--from", "git+https://github.com/gobeyondfj-cmd/boundra", "boundra-mcp"] } } }
+```
+
+**5 · Every payment gets a verdict before signing**
+
+Your agent calls `evaluate_payment`; the 5-stage pipeline answers
+**ALLOW** (sign & settle) / **DENY** (aborted pre-signature, zero on-chain
+trace) / **ASK** (a challenge bound to this exact payment).
+
+**6 · When the agent asks, you decide**
+
+```bash
+uvx --from git+https://github.com/gobeyondfj-cmd/boundra boundra-approve
+```
+
+Paste the ASK challenge, sign it on your device — the agent retries with the
+signed approval token. Forged, rebound, or replayed tokens are rejected.
+
+**7 · Watch, update, revoke**
+
+`get_spend_report` / `get_audit_trail` / `get_policy_versions` keep you in
+control day to day. Every policy change is a new signed version
+(`set_policy`); `revoke_policy` is instant default-deny and **free forever**.
+
 ## Quick start (from source)
 
 ```bash
