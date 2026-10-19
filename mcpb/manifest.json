@@ -1,0 +1,315 @@
+{
+  "manifest_version": "0.3",
+  "name": "boundra",
+  "display_name": "Boundra — Agent Payment Guardrails",
+  "version": "0.1.0",
+  "description": "Policy decision point for agent payments: allow, ask, or veto before the signature. x402-native, open source.",
+  "long_description": "Boundra sits between your AI agent and its wallet. Every payment intent is evaluated against stacked policy layers (platform red lines → user → agent → single-use mandate) **before** any signature happens.\n\n- **evaluate_payment** — the gate every agent payment must pass: ALLOW / DENY / ASK\n- **Human-in-the-loop** — ASK returns a signed challenge; the user's device signs it; the gateway verifies signature, intent match, and nonce\n- **Wallet-signed policies** — policies are signed, hash-chained documents; the trust root is your key, not our database. Revocation is free forever\n- **Spend reports & audit trail** — daily caps, per-transaction limits, recipient allowlists, full history\n- **x402-native** — Boundra's own evaluation API is an x402 merchant; deterministic checks are free, semantic (LLM) evaluation settles USDC on Base",
+  "author": {
+    "name": "Boundra",
+    "email": "support@boundra.io",
+    "url": "https://boundra.io"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gobeyondfj-cmd/boundra"
+  },
+  "homepage": "https://boundra.io",
+  "documentation": "https://github.com/gobeyondfj-cmd/boundra#readme",
+  "support": "https://github.com/gobeyondfj-cmd/boundra/issues",
+  "icon": "icon.png",
+  "server": {
+    "type": "python",
+    "entry_point": "src/mcp_server.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--project",
+        "${__dirname}",
+        "${__dirname}/src/mcp_server.py"
+      ]
+    }
+  },
+  "tools": [
+    {
+      "name": "evaluate_payment",
+      "description": "The gate every agent payment must pass. Returns ALLOW, DENY, or ASK (with a human-approval challenge) based on stacked policy layers.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "number",
+            "description": "Payment amount in USD"
+          },
+          "recipient": {
+            "type": "string",
+            "description": "Recipient identifier (URL, address, or payee name)"
+          },
+          "purpose": {
+            "type": "string",
+            "description": "What this payment is for"
+          },
+          "expected_amount": {
+            "type": "number",
+            "description": "Quoted amount from the merchant's 402 response, for drift detection"
+          },
+          "source_content": {
+            "type": "string",
+            "description": "Untrusted content that motivated the payment (injection scanning)"
+          },
+          "approval_token": {
+            "type": "string",
+            "description": "Signed approval token obtained after an ASK challenge"
+          },
+          "owner": {
+            "type": "string",
+            "description": "Policy owner id (user wallet)"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Calling agent id"
+          },
+          "mandate": {
+            "type": "object",
+            "description": "Single-use signed mandate (AP2-style)"
+          }
+        },
+        "required": [
+          "amount",
+          "recipient",
+          "purpose"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_policy",
+      "description": "View the currently active payment policy.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_spend_report",
+      "description": "View today's spend summary against the configured caps.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_audit_trail",
+      "description": "View recent payment-approval audit records.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "description": "Max records to return",
+            "default": 10
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "request_policy_change",
+      "description": "Agents file a policy-change request for the user to review and sign.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "request": {
+            "type": "string",
+            "description": "Requested policy change"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "request",
+          "reason"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_policy",
+      "description": "User-only: publish a new wallet-signed policy version.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "version": {
+            "type": "number"
+          },
+          "nl_rule": {
+            "type": "string"
+          },
+          "prev_hash": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "number"
+          },
+          "signature": {
+            "type": "string",
+            "description": "Wallet signature over the policy document"
+          },
+          "agent_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner",
+          "scope",
+          "version",
+          "nl_rule",
+          "prev_hash",
+          "created_at",
+          "signature"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "revoke_policy",
+      "description": "User-only: revoke policy versions; revocation is free and defaults to deny.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "revoked_through": {
+            "type": "number"
+          },
+          "created_at": {
+            "type": "number"
+          },
+          "signature": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner",
+          "scope",
+          "revoked_through",
+          "created_at",
+          "signature"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_policy_versions",
+      "description": "View a user's policy version history (hash chain, verifiable against on-chain commitments).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_policy_requests",
+      "description": "List pending agent policy-change requests.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_templates",
+      "description": "List policy templates (personal assistant, travel, dev API, procurement).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "render_template",
+      "description": "Render a natural-language policy rule from a template and parameters.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "template_id": {
+            "type": "string"
+          },
+          "whitelist": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "daily": {
+            "type": "number"
+          },
+          "per_tx": {
+            "type": "number"
+          },
+          "ask_above": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "template_id",
+          "whitelist"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "keywords": [
+    "agent payments",
+    "x402",
+    "policy",
+    "guardrails",
+    "usdc",
+    "stablecoin",
+    "security"
+  ],
+  "license": "Apache-2.0",
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
+    "runtimes": {
+      "python": ">=3.10,<4.0"
+    }
+  }
+}

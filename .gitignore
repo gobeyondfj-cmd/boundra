@@ -19,3 +19,9 @@ dist/
 *.egg-info/
 __pycache__/
 *.pyc
+
+# MCPB build artifacts
+mcpb/.venv/
+mcpb/src/state/
+mcpb/src/__pycache__/
+dist/*.mcpb

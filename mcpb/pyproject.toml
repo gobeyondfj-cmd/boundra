@@ -1,0 +1,9 @@
+[project]
+name = "boundra-mcp"
+version = "0.1.0"
+description = "Boundra — policy-guarded payment approval gateway for AI agents (MCP server)"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=2.3,<3",
+    "eth-account>=0.13",
+]
