@@ -34,7 +34,8 @@ commitments go on-chain. Revocation is free — forever, no exceptions.
 curl -X POST https://api.boundra.io/evaluate/basic \
   -H 'Content-Type: application/json' \
   -d '{"intent":{"amount":0.01,"recipient":"api.weather.com","purpose":"weather data"}}'
-# → {"decision":"ALLOW",...}  ·  semantic layer: 100 free calls per agent, then $0.003 via x402
+# → {"decision":"ALLOW",...}  ·  semantic layer: 100 free calls per agent,
+#   then $0.003 via x402 — settled for real on Base mainnet (USDC)
 
 # 2. Local end-to-end simulation — a data-procurement agent's day
 .venv/bin/python demo/simulate_agent.py
@@ -282,11 +283,14 @@ strictest-wins; signed approval tokens (valid passes, forged rejected,
 intent-rebinding rejected, replay rejected); Mandate single-use; revocation
 defaults to deny and a signed v2 restores; template render+compile; all MCP
 tools over the wire; gateway blocks an injection attack inside the real x402
-402 round-trip before the SDK signs; the full tiered-pricing loop on Base
-Sepolia (2026-10-16): free tier passes, paid tier settles $0.003 USDC for real
-(buyer 20.000 → 19.997, platform address credited 0.003), dogfood hook
-self-evaluates, semantic layer blocks the injection, `/revenue` ledger entry.
-The settlement tx is publicly verifiable: [`0x5ad8ef4b…c474bbe`](https://sepolia.basescan.org/tx/0x5ad8ef4b4d6eef7ba34e718742068f8e8480336c12032a3a85801b101c474bbe)
+402 round-trip before the SDK signs; the full tiered-pricing loop — first
+proven on Base Sepolia (2026-10-16), then on **Base mainnet (2026-10-21)**:
+free tier passes, paid tier settles $0.003 USDC for real (buyer 1.010 → 1.007,
+platform address credited 0.003), dogfood hook self-evaluates, semantic layer
+blocks the injection, `/revenue` ledger entry.
+The mainnet settlement tx is publicly verifiable: [`0xf04d3497…4eac7e5`](https://basescan.org/tx/0xf04d3497626c7eea675440eefd037da22ac400ca874daf8e90564ca124eac7e5)
+— the live API now settles on Base mainnet via Coinbase's CDP facilitator.
+Earlier testnet proof: [`0x5ad8ef4b…c474bbe`](https://sepolia.basescan.org/tx/0x5ad8ef4b4d6eef7ba34e718742068f8e8480336c12032a3a85801b101c474bbe)
 (the hosted service code is closed by design — the chain is the receipt).
 
 **Not yet verified**: real on-chain anchoring (contract ready, needs test ETH
