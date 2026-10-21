@@ -27,6 +27,10 @@ Two run modes:
 Policies and keys stay with the user; the gateway is read-only; only hash
 commitments go on-chain. Revocation is free — forever, no exceptions.
 
+> **Integrating Boundra into your agent?** See
+> [docs/INTEGRATION.md](docs/INTEGRATION.md) — hosted API, x402 SDK hook,
+> and MCP paths with tested code.
+
 ## See it run in 60 seconds
 
 ```bash
