@@ -1,9 +1,10 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
-  "name": "io.github.gobeyondfj-cmd/boundra",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.boundra/boundra",
   "title": "Boundra — Payment Approval Gateway for AI Agents",
-  "description": "Policy decision point for agent payments — allow, ask, or veto before signing",
-  "version": "0.1.0",
+  "description": "Allow, ask, or veto — a policy decision point your agent consults before signing any payment",
+  "version": "0.1.1",
+  "websiteUrl": "https://boundra.io",
   "repository": {
     "url": "https://github.com/gobeyondfj-cmd/boundra",
     "source": "github"
@@ -12,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "boundra-mcp",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "transport": {
         "type": "stdio"
       }
