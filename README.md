@@ -2,6 +2,8 @@
 
 <!-- mcp-name: io.boundra/boundra -->
 
+[![Boundra on mcprush — Grade A, Trust 95/100](https://mcprush.com/badge/boundra-payment-approval-gateway-for-ai-agent-mcp/card.svg)](https://mcprush.com/to/boundra-payment-approval-gateway-for-ai-agent-mcp?ref=badge)
+
 > **Boundra** (boundra.io) — *Boundaries for agent payments.*
 > The boundary layer for agent payments: before any money moves, answer
 > "should this payment happen at all?"
