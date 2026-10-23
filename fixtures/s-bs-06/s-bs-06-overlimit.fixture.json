@@ -1,0 +1,287 @@
+{
+  "fixture": "S-BS-06 overlimit probe (reviewer remark: spending cap and agreed price are different rules)",
+  "upstream_issue": "https://github.com/x402-foundation/x402/issues/3866",
+  "evidence_discipline": {
+    "established": "the client SIGNED and handed over an EIP-3009 transferWithAuthorization for the offered amount (signer-call counts and values captured at the signer boundary)",
+    "not_established": "an ON-CHAIN overpayment: settlement in this harness is mocked (fault-injection stand, not a facilitator), the client wallet is an unfunded one-shot test key, so no transfer could occur; with a compliant facilitator the captured authorization would settle on-chain as-is",
+    "redaction": "no private keys, no signatures, no usable authorizations; nonce values truncated; settle receipts contain only the stand fake tx hash"
+  },
+  "expectation_provenance": {
+    "rule": "the caller's expected price comes from (a) caller-supplied config EXPECTED_PRICE_ATOMIC (set at harness start) and (b) the first ACCEPTED requirement per (resource url, method) — the quote ledger; accepted_at = timestamp of the confirmed paid cycle",
+    "note": "the server's own 'canonical price' label (resource.description) is captured verbatim as served data ONLY and is NOT used as an expectation — it is not an independent expectation available to the client",
+    "bound_to": [
+      "resource url",
+      "method",
+      "network",
+      "scheme",
+      "asset",
+      "payTo",
+      "amount"
+    ]
+  },
+  "reproduce": {
+    "stand_cmd": "argus run --block B --family BS --scenario S-BS-06 --bind 0.0.0.0:4415 --observe-window-ms 6000 --skip-gate --requirement-amounts \"<A1,A2>\" --json",
+    "client_cmd": "REQUEST_CYCLES=<N> SUT_CLIENT_MODE=observe|control [EXPECTED_PRICE_ATOMIC=<atomic>] npx tsx client_v2.ts  # env: EVM_PRIVATE_KEY, RESOURCE_SERVER_URL=http://127.0.0.1:4415",
+    "amounts_note": "atomic units, USDC 6 decimals: 10000 = $0.01, 100000 = $0.10, 50000 = $0.05, 5000000 = $5.00"
+  },
+  "versions": {
+    "note": "tested version pin (reviewer remark: fixture pinned to the tested version)",
+    "packages": {
+      "@x402/core": "2.28.0",
+      "@x402/evm": "2.28.0",
+      "@x402/express": "2.28.0",
+      "@x402/fetch": "2.28.0",
+      "viem": "2.48.11 (package-lock resolved)"
+    },
+    "runtime": "node v24.21.0",
+    "network": "Base Sepolia (eip155:84532), USDC 0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    "test_lab": {
+      "repo": "github.com/igor-vii/Argus-Agent-Test-Lab",
+      "branch": "block-b/payment-layer",
+      "commit": "6b332970d1e14e206f5fabfaccbe77c3a4502366",
+      "bad_server": "src/blockb/runners/BsRunner.ts (oversize-amount script, --requirement-amounts probe knob)"
+    },
+    "sut_harness": {
+      "file": "sut-x402/client_v2.ts (instrumented official example client, clients/fetch pattern)",
+      "sha256": "a4d2f787edf90d24de3db236158c46e5decd6b7bf3d707493882b960b97382a0"
+    },
+    "captured_at": "2026-10-21T21:54–21:58Z"
+  },
+  "probe_definition": {
+    "purpose": "show what the ONLY configured guard does when the offered amount exceeds the caller-configured spend cap ($1): the cap engages below the signer; between the accepted price and the cap there is no amount-level signal",
+    "observed_error": "Failed to create payment payload: All payment requirements were rejected by spendControls.maxAmountPerPayment ($1, including USDC). Raise maxAmountPerPayment, set it to false to disable, set allowedAssets[].maxAmountPerPayment for a per-asset atomic cap, or set spendControls: false to disable all spend controls.",
+    "layering_note": "with the default cap active, an above-cap requirement never reaches the signer or any price-expectation check (h1ctl): the cap is a ceiling, not a price expectation"
+  },
+  "sessions": [
+    {
+      "session": "h1_run1",
+      "client_mode": "observe",
+      "requirement_amounts_served": [
+        "5000000"
+      ],
+      "request_cycles": 1,
+      "signer_call_count": 0,
+      "per_cycle": [
+        {
+          "cycle": 1,
+          "error": "Failed to create payment payload: All payment requirements were rejected by spendControls.maxAmountPerPayment ($1, including USDC). Raise maxAmountPerPayment, set it to false to disable, set allowedAssets[].maxAmountPerPayment for a per-asset atomic cap, or set spendControls: false to disable all spend controls."
+        }
+      ],
+      "timeline": [
+        {
+          "at": "2026-10-21T21:56:12.435Z",
+          "type": "probe_start",
+          "mode": "observe",
+          "url": "http://127.0.0.1:4415/weather",
+          "cycles": 1,
+          "expected_price_atomic": null,
+          "spend_controls": {
+            "maxAmountPerPayment": "$1"
+          },
+          "note": "settlement is mocked by the harness; captures establish signing, not on-chain transfer"
+        },
+        {
+          "at": "2026-10-21T21:56:12.436Z",
+          "type": "cycle_start",
+          "cycle": 1
+        },
+        {
+          "at": "2026-10-21T21:56:12.475Z",
+          "type": "quote_offered",
+          "cycle_context_url": "http://127.0.0.1:4415/weather",
+          "requirements": {
+            "x402Version": 2,
+            "resource": {
+              "url": "http://127.0.0.1:4415/weather",
+              "description": "canonical resource, real price 10000 atomic units"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "5000000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-10-21T21:56:12.477Z",
+          "type": "cycle_error",
+          "cycle": 1,
+          "error": "Failed to create payment payload: All payment requirements were rejected by spendControls.maxAmountPerPayment ($1, including USDC). Raise maxAmountPerPayment, set it to false to disable, set allowedAssets[].maxAmountPerPayment for a per-asset atomic cap, or set spendControls: false to disable all spend controls."
+        }
+      ],
+      "signer_calls": [],
+      "stand": {
+        "stand_verdict": "PASS",
+        "stand_reasons": [
+          "PASS (attempt 1):",
+          "платежей зафиксировано: 0; запросов: 1; окно наблюдения: 6000ms",
+          "СУТ отказался платить по завышенным требованиям"
+        ]
+      },
+      "expected": "proposed price-expectation check would flag $5 offered for a resource previously accepted at $0.01",
+      "observed": "spend cap rejected the requirement before the signer; signer calls 0"
+    },
+    {
+      "session": "h1_run2",
+      "client_mode": "observe",
+      "requirement_amounts_served": [
+        "5000000"
+      ],
+      "request_cycles": 1,
+      "signer_call_count": 0,
+      "per_cycle": [
+        {
+          "cycle": 1,
+          "error": "Failed to create payment payload: All payment requirements were rejected by spendControls.maxAmountPerPayment ($1, including USDC). Raise maxAmountPerPayment, set it to false to disable, set allowedAssets[].maxAmountPerPayment for a per-asset atomic cap, or set spendControls: false to disable all spend controls."
+        }
+      ],
+      "timeline": [
+        {
+          "at": "2026-10-21T21:56:20.210Z",
+          "type": "probe_start",
+          "mode": "observe",
+          "url": "http://127.0.0.1:4415/weather",
+          "cycles": 1,
+          "expected_price_atomic": null,
+          "spend_controls": {
+            "maxAmountPerPayment": "$1"
+          },
+          "note": "settlement is mocked by the harness; captures establish signing, not on-chain transfer"
+        },
+        {
+          "at": "2026-10-21T21:56:20.210Z",
+          "type": "cycle_start",
+          "cycle": 1
+        },
+        {
+          "at": "2026-10-21T21:56:20.252Z",
+          "type": "quote_offered",
+          "cycle_context_url": "http://127.0.0.1:4415/weather",
+          "requirements": {
+            "x402Version": 2,
+            "resource": {
+              "url": "http://127.0.0.1:4415/weather",
+              "description": "canonical resource, real price 10000 atomic units"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "5000000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-10-21T21:56:20.254Z",
+          "type": "cycle_error",
+          "cycle": 1,
+          "error": "Failed to create payment payload: All payment requirements were rejected by spendControls.maxAmountPerPayment ($1, including USDC). Raise maxAmountPerPayment, set it to false to disable, set allowedAssets[].maxAmountPerPayment for a per-asset atomic cap, or set spendControls: false to disable all spend controls."
+        }
+      ],
+      "signer_calls": [],
+      "stand": {
+        "stand_verdict": "PASS",
+        "stand_reasons": [
+          "PASS (attempt 1):",
+          "платежей зафиксировано: 0; запросов: 1; окно наблюдения: 6000ms",
+          "СУТ отказался платить по завышенным требованиям"
+        ]
+      },
+      "repeat_of": "h1_run1"
+    },
+    {
+      "session": "h1ctl_run1",
+      "client_mode": "control",
+      "requirement_amounts_served": [
+        "5000000"
+      ],
+      "request_cycles": 1,
+      "signer_call_count": 0,
+      "per_cycle": [
+        {
+          "cycle": 1,
+          "error": "Failed to create payment payload: All payment requirements were rejected by spendControls.maxAmountPerPayment ($1, including USDC). Raise maxAmountPerPayment, set it to false to disable, set allowedAssets[].maxAmountPerPayment for a per-asset atomic cap, or set spendControls: false to disable all spend controls."
+        }
+      ],
+      "timeline": [
+        {
+          "at": "2026-10-21T21:58:01.349Z",
+          "type": "probe_start",
+          "mode": "control",
+          "url": "http://127.0.0.1:4415/weather",
+          "cycles": 1,
+          "expected_price_atomic": "10000",
+          "spend_controls": {
+            "maxAmountPerPayment": "$1"
+          },
+          "note": "settlement is mocked by the harness; captures establish signing, not on-chain transfer"
+        },
+        {
+          "at": "2026-10-21T21:58:01.350Z",
+          "type": "cycle_start",
+          "cycle": 1
+        },
+        {
+          "at": "2026-10-21T21:58:01.392Z",
+          "type": "quote_offered",
+          "cycle_context_url": "http://127.0.0.1:4415/weather",
+          "requirements": {
+            "x402Version": 2,
+            "resource": {
+              "url": "http://127.0.0.1:4415/weather",
+              "description": "canonical resource, real price 10000 atomic units"
+            },
+            "accepts": [
+              {
+                "scheme": "exact",
+                "network": "eip155:84532",
+                "amount": "5000000",
+                "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                "payTo": "0x9999999999999999999999999999999999999999",
+                "maxTimeoutSeconds": 60,
+                "extra": {
+                  "name": "USDC",
+                  "version": "2"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "at": "2026-10-21T21:58:01.393Z",
+          "type": "cycle_error",
+          "cycle": 1,
+          "error": "Failed to create payment payload: All payment requirements were rejected by spendControls.maxAmountPerPayment ($1, including USDC). Raise maxAmountPerPayment, set it to false to disable, set allowedAssets[].maxAmountPerPayment for a per-asset atomic cap, or set spendControls: false to disable all spend controls."
+        }
+      ],
+      "signer_calls": [],
+      "stand": {
+        "stand_verdict": "PASS",
+        "stand_reasons": [
+          "PASS (attempt 1):",
+          "платежей зафиксировано: 0; запросов: 1; окно наблюдения: 6000ms",
+          "СУТ отказался платить по завышенным требованиям"
+        ]
+      },
+      "expected": "caller_expectation_mismatch would fire if the cap did not",
+      "observed": "spendControls rejected upstream of the control gate; signer calls 0"
+    }
+  ]
+}

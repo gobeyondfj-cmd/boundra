@@ -1,0 +1,157 @@
+{
+  "subject_under_test": "Boundra policy engine (policy.evaluate, deterministic + semantic layers)",
+  "fixtures": {
+    "source": "igor-vii/Argus-Agent-Test-Lab",
+    "files": [
+      "s-bs-06-overlimit.fixture.json",
+      "s-bs-06-quote-control.fixture.json"
+    ],
+    "upstream_issue": "https://github.com/x402-foundation/x402/issues/3866",
+    "x402_version_under_test": "@x402/* 2.28.0"
+  },
+  "config": {
+    "per_tx_max_usd": 1.0,
+    "caller_expectation_usd": 0.01,
+    "max_amount_jump_ratio": 3.0,
+    "whitelist": [
+      "0x9999999999999999999999999999999999999999"
+    ]
+  },
+  "results": [
+    {
+      "session": "c1_run1",
+      "mode": "observe",
+      "cycle": 1,
+      "served_atomic": 10000,
+      "served_usd": 0.01,
+      "boundra_decision": "ALLOW",
+      "boundra_layer": "pass",
+      "reasons": [
+        "within policy \u2014 auto-approved"
+      ],
+      "official_client": "signed"
+    },
+    {
+      "session": "c1_run1",
+      "mode": "observe",
+      "cycle": 2,
+      "served_atomic": 10000,
+      "served_usd": 0.01,
+      "boundra_decision": "ALLOW",
+      "boundra_layer": "pass",
+      "reasons": [
+        "within policy \u2014 auto-approved"
+      ],
+      "official_client": "signed"
+    },
+    {
+      "session": "c2_run1",
+      "mode": "observe",
+      "cycle": 1,
+      "served_atomic": 10000,
+      "served_usd": 0.01,
+      "boundra_decision": "ALLOW",
+      "boundra_layer": "pass",
+      "reasons": [
+        "within policy \u2014 auto-approved"
+      ],
+      "official_client": "signed"
+    },
+    {
+      "session": "c2_run1",
+      "mode": "observe",
+      "cycle": 2,
+      "served_atomic": 100000,
+      "served_usd": 0.1,
+      "boundra_decision": "DENY",
+      "boundra_layer": "semantic",
+      "reasons": [
+        "amount $0.1 jumps beyond 3.0x the expected $0.01: intent drift from the original authorization"
+      ],
+      "official_client": "signed"
+    },
+    {
+      "session": "c2ctl_run1",
+      "mode": "control",
+      "cycle": 2,
+      "served_atomic": 100000,
+      "served_usd": 0.1,
+      "boundra_decision": "DENY",
+      "boundra_layer": "semantic",
+      "reasons": [
+        "amount $0.1 jumps beyond 3.0x the expected $0.01: intent drift from the original authorization"
+      ],
+      "official_client": "rejected by igor's control gate pre-signer"
+    },
+    {
+      "session": "e1ctl_run1",
+      "mode": "control",
+      "cycle": 1,
+      "served_atomic": 50000,
+      "served_usd": 0.05,
+      "boundra_decision": "DENY",
+      "boundra_layer": "semantic",
+      "reasons": [
+        "amount $0.05 jumps beyond 3.0x the expected $0.01: intent drift from the original authorization"
+      ],
+      "official_client": "rejected: caller_expectation_mismatch (below $1 cap)"
+    },
+    {
+      "session": "h1_run1",
+      "mode": "observe",
+      "cycle": 1,
+      "served_atomic": 5000000,
+      "served_usd": 5.0,
+      "boundra_decision": "DENY",
+      "boundra_layer": "semantic",
+      "reasons": [
+        "amount $5.0 jumps beyond 3.0x the expected $0.01: intent drift from the original authorization"
+      ],
+      "official_client": "rejected by $1 spend cap pre-signer"
+    },
+    {
+      "session": "issue-3866-original",
+      "mode": "observe",
+      "cycle": 1,
+      "served_atomic": 100000,
+      "served_usd": 0.1,
+      "boundra_decision": "DENY",
+      "boundra_layer": "semantic",
+      "reasons": [
+        "amount $0.1 jumps beyond 3.0x the expected $0.01: intent drift from the original authorization"
+      ],
+      "official_client": "signed (under the $1 cap)"
+    }
+  ],
+  "cross_checks": [
+    {
+      "check": "c1 both cycles ALLOW (unchanged quote still works)",
+      "pass": true
+    },
+    {
+      "check": "c2 cycle 2 DENY at semantic layer (official client SIGNED the 10x quote)",
+      "pass": true
+    },
+    {
+      "check": "c2ctl matches igor's control gate: DENY pre-signer",
+      "pass": true
+    },
+    {
+      "check": "e1 first-acceptance mismatch DENY (below the $1 cap - cap alone misses it)",
+      "pass": true
+    },
+    {
+      "check": "h1 $5.00 DENY (semantic layer fires before the $1 limit layer)",
+      "pass": true
+    },
+    {
+      "check": "original #3866 capture: $0.10 under the cap -> Boundra DENYs the signed intent",
+      "pass": true
+    }
+  ],
+  "summary": {
+    "total": 6,
+    "passed": 6,
+    "all_pass": true
+  }
+}
