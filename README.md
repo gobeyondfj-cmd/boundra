@@ -90,6 +90,15 @@ your key is impossible.
 
 **4 · Mount the MCP server into your agent**
 
+Hosted (zero install, multi-tenant, default-deny until you publish a signed
+policy):
+
+```json
+{ "mcpServers": { "boundra": { "url": "https://api.boundra.io/mcp" } } }
+```
+
+Or self-hosted:
+
 ```json
 { "mcpServers": { "boundra": { "command": "uvx",
   "args": ["--from", "git+https://github.com/gobeyondfj-cmd/boundra", "boundra-mcp"] } } }

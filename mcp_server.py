@@ -96,11 +96,11 @@ def get_policy() -> str:
 
 
 @server.tool(description="View today's spend summary")
-def get_spend_report() -> str:
+def get_spend_report(owner: str | None = None) -> str:
     today = date.today().isoformat()
-    spent = gateway._spent.get(today, 0.0)
+    spent = gateway.spent_today(owner)
     budget = gateway.legacy_policy.daily_budget if gateway.legacy_policy else None
-    return json.dumps({"date": today, "spent": round(spent, 2),
+    return json.dumps({"date": today, "owner": owner, "spent": round(spent, 2),
                        "daily_budget": budget,
                        "remaining": round(budget - spent, 2) if budget else None},
                       ensure_ascii=False)

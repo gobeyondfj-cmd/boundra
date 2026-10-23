@@ -80,7 +80,7 @@ def main():
     # ── 场景 4：日预算耗尽 → 拒绝 ──────────────────────────────────
     hr("场景 4 · 白名单商户 $5，但今日已花 $47（日预算 $50 将爆）")
     from datetime import date
-    gw._spent[date.today().isoformat()] = 47.0   # 模拟今日已发生支出
+    gw._spent[gw._spent_key(None, date.today().isoformat())] = 47.0   # 模拟今日已发生支出
     with MerchantServer(price=5.0, recipient="api.weather.com") as m:
         plan = BuyerAgent(gw, expected_amount=5.0).buy(m.url, "再次查询天气")
     show_verdict(plan)

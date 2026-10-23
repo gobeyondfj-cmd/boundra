@@ -3,12 +3,18 @@
   "name": "io.boundra/boundra",
   "title": "Boundra — Payment Approval Gateway for AI Agents",
   "description": "Allow, ask, or veto — a policy decision point your agent consults before signing any payment",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "websiteUrl": "https://boundra.io",
   "repository": {
     "url": "https://github.com/gobeyondfj-cmd/boundra",
     "source": "github"
   },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://api.boundra.io/mcp"
+    }
+  ],
   "packages": [
     {
       "registryType": "pypi",

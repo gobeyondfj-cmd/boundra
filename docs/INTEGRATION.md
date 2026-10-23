@@ -100,6 +100,27 @@ response content scanned for injection (pass it as `source_content`).
 
 ## C · MCP server
 
+### C1 · Hosted MCP (zero install)
+
+Point any streamable-HTTP MCP client at our hosted multi-tenant endpoint:
+
+```json
+{
+  "mcpServers": {
+    "boundra": {
+      "url": "https://api.boundra.io/mcp"
+    }
+  }
+}
+```
+
+Multi-tenant by design: every tool call is namespaced by your wallet
+(`owner`). No signed policy on file → **default-deny**. Publish your policy
+with `set_policy` (signed by the owner's key), then `evaluate_payment` before
+every spend. Spend counters are per-owner; policies persist across restarts.
+
+### C2 · Self-hosted MCP (full policy lifecycle locally)
+
 Full policy lifecycle — signed policies, templates, ASK approval tokens,
 spend reports, audit trail — as MCP tools inside your agent host:
 

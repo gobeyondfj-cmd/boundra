@@ -15,10 +15,11 @@ chain_config.json 格式：
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
-STATE_DIR = Path(__file__).parent / "state"
+STATE_DIR = Path(os.environ.get("BOUNDRA_STATE_DIR") or (Path(__file__).parent / "state"))
 
 ABI = [
     {"inputs": [{"name": "docHash", "type": "bytes32"},

@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from policy import Policy, compile_policy
 
-STATE_DIR = Path(__file__).parent / "state"
+STATE_DIR = Path(os.environ.get("BOUNDRA_STATE_DIR") or (Path(__file__).parent / "state"))
 ANCHOR_LOG = STATE_DIR / "anchor_log.jsonl"
 
 
@@ -163,10 +164,42 @@ class PolicyStore:
       3. prev_hash == 当前最新版本的 hash（版本链不断）
     """
 
-    def __init__(self, anchor: LocalAnchor | None = None):
+    def __init__(self, anchor: LocalAnchor | None = None,
+                 persist_path: Path | None = None):
         self.chains: dict[tuple, list[PolicyDocument]] = {}
         self.revocations: dict[tuple, int] = {}     # key -> revoked_through
         self.anchor = anchor or LocalAnchor()
+        # 可选磁盘持久化（托管多租户场景必开；本地默认关闭，保持测试可重复）
+        self.persist_path = persist_path
+        if self.persist_path:
+            self._load()
+
+    # ---- 持久化 ------------------------------------------------------
+    def _load(self):
+        if not self.persist_path.exists():
+            return
+        data = json.loads(self.persist_path.read_text(encoding="utf-8"))
+        for entry in data.get("chains", []):
+            key = tuple(entry["key"])
+            self.chains[key] = [PolicyDocument(**d) for d in entry["docs"]]
+        for entry in data.get("revocations", []):
+            self.revocations[tuple(entry["key"])] = entry["revoked_through"]
+
+    def _save(self):
+        if not self.persist_path:
+            return
+        self.persist_path.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "chains": [{"key": list(k),
+                        "docs": [{**d.unsigned_dict(), "signature": d.signature,
+                                  "hash": d.hash} for d in chain]}
+                       for k, chain in self.chains.items()],
+            "revocations": [{"key": list(k), "revoked_through": v}
+                            for k, v in self.revocations.items()],
+        }
+        tmp = self.persist_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(self.persist_path)   # 原子替换，防半截写入
 
     @staticmethod
     def _key(owner: str, scope: str, agent_id: str | None) -> tuple:
@@ -188,6 +221,7 @@ class PolicyStore:
         doc.finalize()
         chain.append(doc)
         self.anchor.anchor(doc.owner, doc.version, doc.hash)   # 链上承诺（模拟）
+        self._save()
         return doc
 
     def active(self, owner: str, scope: str, agent_id: str | None = None) -> PolicyDocument | None:
@@ -208,6 +242,7 @@ class PolicyStore:
         key = self._key(rec.owner, rec.scope, rec.agent_id)
         self.revocations[key] = max(rec.revoked_through,
                                     self.revocations.get(key, 0))
+        self._save()
 
     def is_revoked(self, owner: str, scope: str, agent_id: str | None) -> bool:
         chain = self.chains.get(self._key(owner, scope, agent_id))

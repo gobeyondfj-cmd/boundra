@@ -15,6 +15,7 @@ legacy human_approved 自证模式保留仅为向后兼容，裁决中标记 dep
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from datetime import date, datetime
 from pathlib import Path
@@ -26,7 +27,7 @@ from policy import (Decision, PaymentIntent, Policy, compile_policy, evaluate,
                     platform_check)
 from signed_policy import PolicyDocument, PolicyStore, Revocation
 
-STATE_DIR = Path(__file__).parent / "state"
+STATE_DIR = Path(os.environ.get("BOUNDRA_STATE_DIR") or (Path(__file__).parent / "state"))
 AUDIT_LOG = STATE_DIR / "audit.jsonl"
 
 _SEVERITY = {"DENY": 2, "ASK": 1, "ALLOW": 0}
@@ -39,10 +40,20 @@ class Gateway:
         self.legacy_policy: Policy | None = compile_policy(nl_rule) if nl_rule else None
         self.human_approval_handler = human_approval_handler
         self.store = store or PolicyStore()
+        # 消费计数按 owner 命名空间（本地/旧调用 owner=None 归 "local"），
+        # 键格式 "owner:today"，使单实例可服务多用户（托管场景）
         self._spent: dict[str, float] = {}
         self._used_tokens: set = set()        # 批准令牌 nonce 防重放
         self._used_mandates: set = set()      # Mandate 单次消费
         STATE_DIR.mkdir(exist_ok=True)
+
+    @staticmethod
+    def _spent_key(owner: str | None, today: str) -> str:
+        return f"{(owner or 'local').lower()}:{today}"
+
+    def spent_today(self, owner: str | None = None) -> float:
+        today = date.today().isoformat()
+        return self._spent.get(self._spent_key(owner, today), 0.0)
 
     # ---- 策略写入（特权操作，仅验签通过才生效） ------------------------
     def set_policy(self, doc: PolicyDocument) -> dict:
@@ -98,7 +109,8 @@ class Gateway:
                          approval_token: str | None = None,
                          mandate: dict | None = None) -> dict:
         today = date.today().isoformat()
-        spent = self._spent.get(today, 0.0)
+        spent_key = self._spent_key(owner, today)
+        spent = self._spent.get(spent_key, 0.0)
         intent_d = {"amount": intent.amount, "recipient": intent.recipient,
                     "purpose": intent.purpose}
 
@@ -167,7 +179,7 @@ class Gateway:
                 challenge = approval_mod.make_challenge(intent_d, policy_refs)
 
         if final_action == "ALLOW":
-            self._spent[today] = spent + intent.amount
+            self._spent[spent_key] = spent + intent.amount
             if mandate_id:
                 self._used_mandates.add(mandate_id)   # 单次消费
 
@@ -192,7 +204,7 @@ class Gateway:
             "reasons": decision.reasons,
             "policy_refs": policy_refs,
             "mandate_id": mandate_id,
-            "spent_today_after": round(self._spent.get(today, 0.0), 2),
+            "spent_today_after": round(self._spent.get(self._spent_key(owner, today), 0.0), 2),
         }
         with AUDIT_LOG.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
