@@ -36,10 +36,14 @@ _SEVERITY = {"DENY": 2, "ASK": 1, "ALLOW": 0}
 class Gateway:
     def __init__(self, nl_rule: str | None = None,
                  human_approval_handler: Optional[Callable[[PaymentIntent, Decision], bool]] = None,
-                 store: PolicyStore | None = None):
+                 store: PolicyStore | None = None,
+                 verdict_signer=None):
         self.legacy_policy: Policy | None = compile_policy(nl_rule) if nl_rule else None
         self.human_approval_handler = human_approval_handler
         self.store = store or PolicyStore()
+        # 可选的平台凭证签名器（verdict_credential.VerdictSigner）；
+        # 设置后每次评估的 verdict 附带 EIP-191 签名凭证
+        self.verdict_signer = verdict_signer
         # 消费计数按 owner 命名空间（本地/旧调用 owner=None 归 "local"），
         # 键格式 "owner:today"，使单实例可服务多用户（托管场景）
         self._spent: dict[str, float] = {}
@@ -216,6 +220,9 @@ class Gateway:
                "spent_today": record["spent_today_after"]}
         if challenge:
             out["challenge"] = challenge   # ASK：交用户签名的 challenge
+        if self.verdict_signer is not None:
+            # 平台签名凭证：任何第三方可离线验证这个判定确实发生
+            out["credential"] = self.verdict_signer.sign(out, record["intent"], owner)
         return out
 
     @property

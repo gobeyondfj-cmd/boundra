@@ -176,6 +176,38 @@ def main():
     check("ALLOW 裁决 → proceed 放行（返回 None）",
           adapter.proceed({"decision": "ALLOW"}) is None)
 
+    # ---- 平台签名凭证（verdict credential）----
+    from policy import PaymentIntent
+    from verdict_credential import VerdictSigner, verify_credential, intent_hash
+    platform = Account.create()
+    signer = VerdictSigner(platform.key.hex())
+    gw_signed = Gateway(nl_rule=None, store=PolicyStore(), verdict_signer=signer)
+    # 先给这个 owner 发布签名策略，再做一次评估
+    doc2 = new_document(owner, "user", None, 1,
+                        "Daily spend cap $50, max $10 per transaction; only pay whitelisted providers (api.weather.com)",
+                        GENESIS)
+    doc2.signature = sign_document(doc2, key)
+    gw_signed.store.submit(doc2)
+    v2 = gw_signed.evaluate_payment(
+        intent=PaymentIntent(amount=3.0, recipient="api.weather.com", purpose="weather"),
+        owner=owner, agent_id=AGENT)
+    cred = v2.get("credential")
+    check("签名网关的 verdict 附带平台凭证", cred is not None, v2)
+    ok, why = verify_credential(cred, expected_issuer=platform.address)
+    check("凭证离线验证通过（签名者=声明的 issuer=平台地址）", ok, why)
+    check("凭证绑定具体意图（intent_hash 一致）",
+          cred["intent_hash"] == intent_hash({"amount": 3.0, "recipient": "api.weather.com",
+                                              "purpose": "weather"}), cred)
+    tampered = {**cred, "decision": "DENY"}
+    ok2, _ = verify_credential(tampered, expected_issuer=platform.address)
+    check("篡改凭证内容 → 验证失败", not ok2)
+    ok3, why3 = verify_credential(cred)  # 默认期望官方平台地址
+    check("非官方平台地址签发的凭证 → 默认验证拒绝", not ok3, why3)
+    v3 = gw.evaluate_payment(intent=PaymentIntent(amount=1.0, recipient="api.weather.com",
+                                                  purpose="weather"),
+                             owner=owner, agent_id=AGENT)
+    check("无签名器的网关不附凭证（向后兼容）", "credential" not in v3, v3)
+
     print(f"\n✔ 全部 {len(PASS)} 项测试通过")
 
 

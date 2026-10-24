@@ -28,8 +28,17 @@ from signed_policy import PolicyDocument, PolicyStore, Revocation
 
 STATE_DIR = Path(os.environ.get("BOUNDRA_STATE_DIR") or (Path(__file__).parent / "state"))
 
+# 平台凭证签名器：配置了 BOUNDRA_VERDICT_KEY（私钥，仅存在于部署密管）时，
+# 每次 evaluate_payment 的 verdict 附带可离线验证的 EIP-191 签名凭证
+_verdict_key = os.environ.get("BOUNDRA_VERDICT_KEY")
+_verdict_signer = None
+if _verdict_key:
+    from verdict_credential import VerdictSigner
+    _verdict_signer = VerdictSigner(_verdict_key)
+
 # 托管实例：无 legacy 规则（无签名策略 = default-deny），策略链持久化
-gateway = Gateway(None, store=PolicyStore(persist_path=STATE_DIR / "policies.json"))
+gateway = Gateway(None, store=PolicyStore(persist_path=STATE_DIR / "policies.json"),
+                  verdict_signer=_verdict_signer)
 
 # Agent 策略变更申请（内存队列；用户通过 list_policy_requests 拉取）
 policy_requests: list[dict] = []
