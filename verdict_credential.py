@@ -27,8 +27,9 @@ from datetime import datetime, timezone
 from signed_policy import canonical
 
 CREDENTIAL_TYPE = "boundra.verdict/v1"
-# 平台签名地址 = 主网收入地址（同一密钥，凭证与收入流向同一身份）
-PLATFORM_ISSUER = "0x0b31bf4A39474Ec1cF1e30840928be2B9701fccb"
+# 平台签名地址 = 主网收入地址（同一密钥，凭证与收入流向同一身份）。
+# 链上佐证：tx 0xf04d3497…eac7e5（Base 主网）中 0.003 USDC 的收款方。
+PLATFORM_ISSUER = "0xF30955B6Be768370Da13fca237A5f252F6081d1C"
 
 
 def intent_hash(intent: dict) -> str:
