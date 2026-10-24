@@ -163,4 +163,39 @@ facilitator. Buyers need USDC only — EIP-3009 means no ETH for gas.
 Proof: the API is itself an x402 merchant and we settle on it for real —
 [basescan.org/tx/0xf04d3497…](https://basescan.org/tx/0xf04d3497626c7eea675440eefd037da22ac400ca874daf8e90564ca124eac7e5)
 
+---
+
+## Verifying verdict credentials
+
+Every verdict from the hosted API and hosted MCP carries a
+`boundra.verdict/v1` credential signed by the platform key (EIP-191).
+Verify it offline — no API call, no trust in the transport:
+
+```python
+import json, hashlib
+from eth_account import Account
+from eth_account.messages import encode_defunct
+
+PLATFORM = "0xF30955B6Be768370Da13fca237A5f252F6081d1C"  # GET /verdict-key
+
+def verify(credential: dict) -> bool:
+    proof = credential.get("proof") or {}
+    payload = {k: v for k, v in credential.items() if k != "proof"}
+    canonical = json.dumps(payload, sort_keys=True,
+                           separators=(",", ":"), ensure_ascii=False)
+    signer = Account.recover_message(
+        encode_defunct(text=canonical),
+        signature=bytes.fromhex(proof["signature"].removeprefix("0x")))
+    return signer.lower() == PLATFORM.lower() == credential["issuer"].lower()
+```
+
+The credential binds the exact payment intent (`intent_hash` = sha256 over
+canonical {amount, recipient, purpose}), the policy versions used
+(`policy_refs`), and the server-side audit entry (`audit_id`). Re-attaching it
+to a different payment or tampering with any field breaks the signature.
+
+The platform issuer address is published at
+`GET https://api.boundra.io/verdict-key` and is the same address that receives
+x402 settlement — one identity for signing and revenue.
+
 Questions: support@boundra.io

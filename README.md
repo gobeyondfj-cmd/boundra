@@ -222,6 +222,34 @@ user private key signature ──→ PolicyDocument (NL rule + compiled artifact
 
 Run: `.venv/bin/python demo/demo_policy.py`
 
+## Verdict credentials: every decision comes with a signed receipt (v4)
+
+Every `evaluate_payment` response carries a `credential` — a
+`boundra.verdict/v1` receipt signed by the platform key (EIP-191). It answers
+"who can prove this ALLOW / DENY / ASK actually happened, under this policy,
+for this exact payment intent?"
+
+- **Binds the intent**: `intent_hash` = sha256 over the canonical
+  {amount, recipient, purpose} — a credential cannot be re-attached to a
+  different payment
+- **Binds the policy**: `policy_refs` lists the policy version hashes used,
+  comparable against on-chain anchors
+- **Binds the audit log**: `audit_id` links to the server-side audit entry
+- **Verifiable offline, by anyone**: strip `proof`, canonicalize the payload
+  (sorted keys, compact separators), recover the EIP-191 signer — it must
+  equal `issuer` **and** the platform address
+  `0xF30955B6Be768370Da13fca237A5f252F6081d1C` (the same address that receives
+  x402 revenue — one identity for signing and settlement). Published at
+  `GET https://api.boundra.io/verdict-key`.
+
+```python
+from verdict_credential import verify_credential
+ok, why = verify_credential(verdict["credential"])   # offline, no API call
+```
+
+Self-hosted gateways attach no credential unless `BOUNDRA_VERDICT_KEY` is set —
+unsigned mode stays fully backward compatible.
+
 ## MCP server tools
 
 | Tool | Purpose | Caller |
