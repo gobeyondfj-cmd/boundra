@@ -33,23 +33,37 @@ PLATFORM_ISSUER = "0xF30955B6Be768370Da13fca237A5f252F6081d1C"
 
 
 def intent_hash(intent: dict) -> str:
-    """支付意图的绑定哈希（sha256 over canonical intent）。"""
-    return hashlib.sha256(canonical({
+    """Bind the complete caller/quote context; legacy three-field intents keep their hash."""
+    payload = {
         "amount": intent.get("amount"),
         "recipient": intent.get("recipient"),
         "purpose": intent.get("purpose"),
-    }).encode()).hexdigest()
+    }
+    for key in ("expected_amount", "expected_recipient", "resource", "method", "network", "asset"):
+        if intent.get(key) not in (None, ""):
+            payload[key] = intent[key]
+    return hashlib.sha256(canonical(payload).encode()).hexdigest()
 
 
 def build_credential_payload(verdict: dict, intent: dict, owner: str | None) -> dict:
     """从 verdict + 原始意图构造待签名凭证体（不含 proof）。"""
+    quote = {k: intent.get(k) for k in
+             ("amount", "recipient", "resource", "method", "network", "asset")
+             if intent.get(k) not in (None, "")}
+    expectation = {k: intent.get(k) for k in ("expected_amount", "expected_recipient")
+                   if intent.get(k) not in (None, "")}
     return {
         "type": CREDENTIAL_TYPE,
         "issuer": PLATFORM_ISSUER,
         "audit_id": verdict.get("audit_id"),
+        "evaluation_id": verdict.get("evaluation_id"),
+        "reservation_status": verdict.get("reservation_status"),
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "owner": owner,
         "intent_hash": intent_hash(intent),
+        "quote": quote,
+        "expectation": expectation,
+        "expectation_source": "caller-config" if expectation else "none",
         "decision": verdict.get("decision"),
         "raw": verdict.get("raw"),
         "layer": verdict.get("layer"),

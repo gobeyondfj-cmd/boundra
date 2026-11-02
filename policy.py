@@ -26,7 +26,9 @@ class Policy:
     daily_budget: float = 50.0             # 日预算
     allowed_recipients: list = field(default_factory=list)  # 收款方白名单
     require_approval_above: float = 5.0    # 超过此金额转人工
-    max_amount_jump_ratio: float = 3.0     # 语义层：金额较预期跳变倍数红线
+    max_amount_jump_ratio: float = 3.0     # 未提交显式期望价时的历史异常跳变红线
+    expected_amount_tolerance: float = 0.0  # 显式期望价双向容差；0 = 精确匹配
+    per_resource_daily_budget: Optional[float] = None  # 单 host/path 的日累计限额
 
 
 # ---------------------------------------------------------------- 意图编译
@@ -48,10 +50,15 @@ def compile_policy(nl_rule: str) -> Policy:
     if m:
         p.per_tx_max = float(m.group(1))
 
+    resource_daily = re.search(r"per[- ](?:resource|endpoint)\s+daily\s+cap\s*\$?" + _NUM,
+                               nl_rule, re.I)
+    if resource_daily:
+        p.per_resource_daily_budget = float(resource_daily.group(1))
+
     m = re.search(r"(?:每天|每日|日)[^0-9]{0,20}" + _NUM, nl_rule)
     if not m:   # English: "Daily spend cap $50" / "$50 per day"
         m = re.search(r"(?:daily|per\s+day|a\s+day)[^0-9$]{0,25}\$?" + _NUM, nl_rule, re.I)
-    if m:
+    if m and not (resource_daily and resource_daily.start() <= m.start() and m.end() <= resource_daily.end()):
         p.daily_budget = float(m.group(1))
 
     m = re.search(r"超过[^0-9]{0,4}" + _NUM + r"[^0-9]{0,8}(?:确认|批准|审批)", nl_rule)
@@ -78,13 +85,18 @@ class PaymentIntent:
     amount: float
     recipient: str
     purpose: str                      # Agent 自述的付款目的
-    expected_amount: Optional[float] = None   #  mandate 下达时的预期金额（语义层锚点）
+    expected_amount: Optional[float] = None   # 调用方承诺的期望金额（双向精确匹配，可配容差）
     source_content: str = ""          # 触发本次付款的商户返回内容（注入检测对象）
+    expected_recipient: Optional[str] = None  # 调用方批准的收款方
+    resource: str = ""                # 商户 URL / host+path
+    method: str = ""                  # HTTP method
+    network: str = ""                 # CAIP-2 network
+    asset: str = ""                   # 支付资产合约/标识
 
 
 @dataclass
 class Decision:
-    action: str          # ALLOW / ASK / DENY
+    action: str          # ALLOW / ASK / DENY / INDETERMINATE
     reasons: list = field(default_factory=list)
     layer: str = ""      # 命中的评估层：semantic / whitelist / limit / approval / budget / pass
 
@@ -92,11 +104,23 @@ class Decision:
 # ---------------------------------------------------------------- 语义层（新风险类别）
 
 _INJECTION_PATTERNS = [
-    r"ignore (all |previous )?instructions",
+    r"\b(?:ignore|disregard|forget)\b.{0,40}\b(?:instructions?|rules?|constraints?)\b",
     r"忽略(之前|以上|所有)的?(指令|规则|指示)",
-    r"SYSTEM\s*:", r"<\s*system\s*>",
-    r"改为?支付", r"转账(给|至)", r"send (the )?(funds|payment|max)",
+    r"\bSYSTEM\s*:", r"<\s*system\s*>", r"\bnew\s+system\s+instruction\s*:",
+    r"\b(?:developer|god|admin)\s+mode\b",
+    r"\b(?:override|bypass|disable)\b.{0,40}\b(?:policy|rules?|guardrails?|approval)\b",
+    r"\bdo\s+not\s+call\b.{0,30}\bpolicy\b",
+    r"改为?支付", r"转账(给|至)",
+    r"\bsend\s+(?:the\s+)?(?:funds|payment|max)(?:\s+balance)?\s+(?:to|now|immediately)\b",
+    r"\btransfer\s+(?:the\s+)?(?:funds|max)(?:\s+balance)?\s+(?:to|now|immediately)\b",
 ]
+
+def recipients_match(expected: str, actual: str) -> bool:
+    """EVM addresses are case-insensitive; other recipient namespaces stay exact."""
+    evm_shape = (expected.startswith("0x") and actual.startswith("0x")
+                 and len(expected) == len(actual) == 42)
+    return expected.lower() == actual.lower() if evm_shape else expected == actual
+
 
 def semantic_check(policy: Policy, intent: PaymentIntent) -> Optional[Decision]:
     """传统风控里不存在的评估：Agent 的最终意图是否还落在用户原始授权的语义边界内。
@@ -112,25 +136,33 @@ def semantic_check(policy: Policy, intent: PaymentIntent) -> Optional[Decision]:
         return Decision("DENY", layer="semantic",
                         reasons=[f"source content carries injection markers ({len(hits)} hits): "
                                  f"suspected prompt injection — agent intent may be hijacked"])
-    if (intent.expected_amount is not None and intent.expected_amount > 0
-            and intent.amount > intent.expected_amount * policy.max_amount_jump_ratio):
-        return Decision("DENY", layer="semantic",
-                        reasons=[f"amount ${intent.amount} jumps beyond {policy.max_amount_jump_ratio}x "
-                                 f"the expected ${intent.expected_amount}: intent drift from the "
-                                 f"original authorization"])
+    if intent.expected_amount is not None and intent.expected_amount > 0:
+        tolerance = max(0.0, float(policy.expected_amount_tolerance))
+        if abs(intent.amount - intent.expected_amount) > intent.expected_amount * tolerance:
+            return Decision("DENY", layer="semantic",
+                            reasons=[f"amount ${intent.amount} differs from caller-committed "
+                                     f"expected ${intent.expected_amount} (tolerance={tolerance})"])
+    if intent.expected_recipient:
+        if not recipients_match(intent.expected_recipient, intent.recipient):
+            return Decision("DENY", layer="semantic",
+                            reasons=[f"recipient {intent.recipient} differs from caller-approved "
+                                     f"{intent.expected_recipient}"])
     return None
 
 
 # ---------------------------------------------------------------- 五段式评估管线
 
-def evaluate(policy: Policy, intent: PaymentIntent, spent_today: float) -> Decision:
+def evaluate(policy: Policy, intent: PaymentIntent, spent_today: float,
+             resource_spent_today: float = 0.0) -> Decision:
     # 第 1 层：语义评估（Agent 时代的新风险——意图漂移 / 注入）
     d = semantic_check(policy, intent)
     if d:
         return d
 
     # 第 2 层：收款方白名单（未知商户不直接拒，转人工）
-    if policy.allowed_recipients and intent.recipient not in policy.allowed_recipients:
+    if (policy.allowed_recipients and not any(
+            recipients_match(allowed, intent.recipient)
+            for allowed in policy.allowed_recipients)):
         return Decision("ASK", layer="whitelist",
                         reasons=[f"recipient {intent.recipient} is not on the whitelist — human confirmation required"])
 
@@ -144,6 +176,14 @@ def evaluate(policy: Policy, intent: PaymentIntent, spent_today: float) -> Decis
         return Decision("DENY", layer="budget",
                         reasons=[f"this payment would push today's spend to ${spent_today + intent.amount:.2f}, "
                                  f"beyond the daily budget ${policy.daily_budget}"])
+
+    # 单端点累计预算：限制一个商户通过渐进涨价耗尽全局预算
+    if (intent.resource and policy.per_resource_daily_budget is not None
+            and resource_spent_today + intent.amount > policy.per_resource_daily_budget):
+        return Decision("DENY", layer="budget",
+                        reasons=[f"this payment would push resource spend to "
+                                 f"${resource_spent_today + intent.amount:.2f}, beyond the "
+                                 f"per-resource daily budget ${policy.per_resource_daily_budget}"])
 
     # 第 5 层：分级审批（规则内但高于阈值 → 转人工）
     if intent.amount > policy.require_approval_above:

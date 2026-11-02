@@ -19,6 +19,7 @@ dist/
 *.egg-info/
 __pycache__/
 *.pyc
+node_modules/
 
 # MCPB build artifacts
 mcpb/.venv/

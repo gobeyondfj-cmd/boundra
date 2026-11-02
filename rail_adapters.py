@@ -29,6 +29,11 @@ class RailContext:
     recipient: str
     purpose: str
     expected_amount: Optional[float] = None
+    expected_recipient: Optional[str] = None
+    resource: Optional[str] = None
+    method: Optional[str] = None
+    network: Optional[str] = None
+    asset: Optional[str] = None
     source_content: str = ""
     rail: str = "unknown"
     raw: Any = None                     # 轨道原始对象，备查
@@ -37,6 +42,9 @@ class RailContext:
         return PaymentIntent(amount=self.amount, recipient=self.recipient,
                              purpose=self.purpose,
                              expected_amount=self.expected_amount,
+                             expected_recipient=self.expected_recipient,
+                             resource=self.resource, method=self.method,
+                             network=self.network, asset=self.asset,
                              source_content=self.source_content)
 
 
@@ -65,17 +73,38 @@ class X402Adapter(RailAdapter):
     USDC_DECIMALS = 6
 
     def extract(self, payment_ctx: Any, purpose: str,
-                expected_amount: Optional[float] = None) -> RailContext:
+                expected_amount: Optional[float] = None,
+                expected_recipient: Optional[str] = None) -> RailContext:
         req = payment_ctx.selected_requirements
+        resource = self._resource_of(payment_ctx)
         return RailContext(
             amount=int(req.amount) / 10 ** self.USDC_DECIMALS,
             recipient=req.pay_to,
             purpose=purpose,
             expected_amount=expected_amount,
+            expected_recipient=expected_recipient,
+            resource=resource.get("url"),
+            method=resource.get("method"),
+            network=getattr(req, "network", None),
+            asset=getattr(req, "asset", None),
             source_content=self._description_of(payment_ctx),
             rail=self.name,
             raw=payment_ctx,
         )
+
+    @staticmethod
+    def _resource_of(payment_ctx) -> dict:
+        pr = getattr(payment_ctx, "payment_required", None)
+        if pr is None:
+            return {}
+        res = pr.get("resource") if isinstance(pr, dict) else getattr(pr, "resource", None)
+        if res is None:
+            return {}
+        if isinstance(res, dict):
+            return res
+        return {"url": getattr(res, "url", None),
+                "method": getattr(res, "method", None),
+                "description": getattr(res, "description", "")}
 
     @staticmethod
     def _description_of(payment_ctx) -> str:

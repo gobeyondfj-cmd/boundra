@@ -25,6 +25,7 @@ from mcp.server.mcpserver import MCPServer
 sys.path.insert(0, str(Path(__file__).parent))
 from gateway import AUDIT_LOG, Gateway
 from signed_policy import PolicyDocument, PolicyStore, Revocation
+from spend_ledger import SpendLedger
 
 STATE_DIR = Path(os.environ.get("BOUNDRA_STATE_DIR") or (Path(__file__).parent / "state"))
 
@@ -38,7 +39,8 @@ if _verdict_key:
 
 # 托管实例：无 legacy 规则（无签名策略 = default-deny），策略链持久化
 gateway = Gateway(None, store=PolicyStore(persist_path=STATE_DIR / "policies.json"),
-                  verdict_signer=_verdict_signer)
+                  verdict_signer=_verdict_signer,
+                  ledger=SpendLedger(STATE_DIR / "spend.db"))
 
 # Agent 策略变更申请（内存队列；用户通过 list_policy_requests 拉取）
 policy_requests: list[dict] = []
@@ -65,6 +67,11 @@ server = MCPServer(
     "An optional mandate parameter carries a user-issued single-task authorization."))
 def evaluate_payment(amount: float, recipient: str, purpose: str,
                      expected_amount: float | None = None,
+                     expected_recipient: str | None = None,
+                     resource: str | None = None,
+                     method: str | None = None,
+                     network: str | None = None,
+                     asset: str | None = None,
                      source_content: str = "",
                      approval_token: str | None = None,
                      owner: str | None = None,
@@ -72,12 +79,46 @@ def evaluate_payment(amount: float, recipient: str, purpose: str,
                      mandate: dict | None = None) -> str:
     verdict = gateway.handle_tool_call("evaluate_payment", {
         "intent": {"amount": amount, "recipient": recipient, "purpose": purpose,
-                   "expected_amount": expected_amount, "source_content": source_content},
+                   "expected_amount": expected_amount,
+                   "expected_recipient": expected_recipient,
+                   "resource": resource, "method": method,
+                   "network": network, "asset": asset,
+                   "source_content": source_content},
         "approval_token": approval_token, "owner": owner,
         "agent_id": agent_id, "mandate": mandate,
         "human_approved": False,   # 托管版禁用 legacy 自证审批
     })
     return json.dumps(verdict, ensure_ascii=False)
+
+
+@server.tool(description=(
+    "Confirm that an ALLOWed payment settled. Requires the evaluation_id and the "
+    "reservation_token returned by evaluate_payment, plus the real transaction/hash reference. "
+    "Idempotent for the same evaluation; never call this before settlement."))
+def settle_evaluation(evaluation_id: str, reservation_token: str,
+                      settlement_ref: str) -> str:
+    try:
+        result = gateway.settle_evaluation(evaluation_id, reservation_token, settlement_ref)
+    except (PermissionError, RuntimeError, ValueError) as e:
+        result = {"settled": False, "error": str(e)}
+    return json.dumps(result, ensure_ascii=False)
+
+
+@server.tool(description=(
+    "Release a reserved ALLOW budget when the payment failed or was abandoned. "
+    "Requires the evaluation_id and reservation_token returned by evaluate_payment."))
+def release_evaluation(evaluation_id: str, reservation_token: str) -> str:
+    try:
+        result = gateway.release_evaluation(evaluation_id, reservation_token)
+    except (PermissionError, RuntimeError, ValueError) as e:
+        result = {"released": False, "error": str(e)}
+    return json.dumps(result, ensure_ascii=False)
+
+
+@server.tool(description="Inspect the reservation/settlement state of an evaluation")
+def get_evaluation(evaluation_id: str) -> str:
+    result = gateway.ledger.get(evaluation_id) if gateway.ledger else None
+    return json.dumps(result or {"error": "evaluation not found"}, ensure_ascii=False)
 
 
 @server.tool(description=(
@@ -133,7 +174,9 @@ def _compiled(nl_rule: str) -> dict:
     c = compile_policy(nl_rule)
     return {"per_tx_max": c.per_tx_max, "daily_budget": c.daily_budget,
             "allowed_recipients": c.allowed_recipients,
-            "require_approval_above": c.require_approval_above}
+            "require_approval_above": c.require_approval_above,
+            "expected_amount_tolerance": c.expected_amount_tolerance,
+            "per_resource_daily_budget": c.per_resource_daily_budget}
 
 
 @server.tool(description=(

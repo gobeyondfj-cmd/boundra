@@ -15,6 +15,7 @@ legacy human_approved 自证模式保留仅为向后兼容，裁决中标记 dep
 from __future__ import annotations
 
 import json
+import math
 import os
 import uuid
 from datetime import date, datetime
@@ -26,26 +27,27 @@ from mandate import Mandate, check_against_intent, verify_mandate
 from policy import (Decision, PaymentIntent, Policy, compile_policy, evaluate,
                     platform_check)
 from signed_policy import PolicyDocument, PolicyStore, Revocation
+from spend_ledger import ReservationError, SpendLedger
 
 STATE_DIR = Path(os.environ.get("BOUNDRA_STATE_DIR") or (Path(__file__).parent / "state"))
 AUDIT_LOG = STATE_DIR / "audit.jsonl"
 
-_SEVERITY = {"DENY": 2, "ASK": 1, "ALLOW": 0}
+_SEVERITY = {"INDETERMINATE": 3, "DENY": 2, "ASK": 1, "ALLOW": 0}
 
 
 class Gateway:
     def __init__(self, nl_rule: str | None = None,
                  human_approval_handler: Optional[Callable[[PaymentIntent, Decision], bool]] = None,
                  store: PolicyStore | None = None,
-                 verdict_signer=None):
+                 verdict_signer=None, ledger: SpendLedger | None = None):
         self.legacy_policy: Policy | None = compile_policy(nl_rule) if nl_rule else None
         self.human_approval_handler = human_approval_handler
         self.store = store or PolicyStore()
         # 可选的平台凭证签名器（verdict_credential.VerdictSigner）；
         # 设置后每次评估的 verdict 附带 EIP-191 签名凭证
         self.verdict_signer = verdict_signer
-        # 消费计数按 owner 命名空间（本地/旧调用 owner=None 归 "local"），
-        # 键格式 "owner:today"，使单实例可服务多用户（托管场景）
+        self.ledger = ledger
+        # 无持久化 ledger 的本地兼容路径；托管环境应始终注入 SpendLedger。
         self._spent: dict[str, float] = {}
         self._used_tokens: set = set()        # 批准令牌 nonce 防重放
         self._used_mandates: set = set()      # Mandate 单次消费
@@ -55,7 +57,10 @@ class Gateway:
     def _spent_key(owner: str | None, today: str) -> str:
         return f"{(owner or 'local').lower()}:{today}"
 
-    def spent_today(self, owner: str | None = None) -> float:
+    def spent_today(self, owner: str | None = None, agent_id: str | None = None,
+                    resource: str | None = None) -> float:
+        if self.ledger and owner:
+            return self.ledger.spent_today(owner, agent_id, resource)
         today = date.today().isoformat()
         return self._spent.get(self._spent_key(owner, today), 0.0)
 
@@ -114,9 +119,18 @@ class Gateway:
                          mandate: dict | None = None) -> dict:
         today = date.today().isoformat()
         spent_key = self._spent_key(owner, today)
-        spent = self._spent.get(spent_key, 0.0)
+        spent = self.spent_today(owner)
+        resource_spent = (self.spent_today(owner, resource=intent.resource)
+                          if intent.resource else 0.0)
+        # Approval/mandate compatibility remains bound to the original three fields.
         intent_d = {"amount": intent.amount, "recipient": intent.recipient,
                     "purpose": intent.purpose}
+
+        if not math.isfinite(intent.amount) or intent.amount <= 0 or not intent.recipient.strip():
+            d = Decision("INDETERMINATE", layer="input",
+                         reasons=["amount must be finite and positive, and recipient must be present"])
+            return self._finalize(d, d.action, None, intent, agent_id, owner,
+                                  [], spent, today)
 
         # 第 0 层：平台红线（先于一切）
         red = platform_check(intent, spent)
@@ -137,7 +151,7 @@ class Gateway:
             return self._finalize(d, "DENY", None, intent, agent_id, owner,
                                   [], spent, today)
 
-        decisions = [evaluate(p, intent, spent) for p in policies]
+        decisions = [evaluate(p, intent, spent, resource_spent) for p in policies]
         decision = max(decisions, key=lambda d: _SEVERITY[d.action])
         if len(decisions) > 1:
             decision.reasons.append(f"(stacked {len(decisions)} policy layers, strictest wins)")
@@ -182,24 +196,50 @@ class Gateway:
                 final_action = "ASK"
                 challenge = approval_mod.make_challenge(intent_d, policy_refs)
 
+        reservation = None
         if final_action == "ALLOW":
-            self._spent[spent_key] = spent + intent.amount
-            if mandate_id:
+            if self.ledger and owner:
+                daily_cap = min([p.daily_budget for p in policies] + [5000.0])
+                resource_caps = [p.per_resource_daily_budget for p in policies
+                                 if p.per_resource_daily_budget is not None]
+                try:
+                    reservation = self.ledger.reserve(
+                        owner=owner, agent_id=agent_id,
+                        resource=intent.resource or intent.recipient,
+                        amount=intent.amount, daily_cap=daily_cap,
+                        resource_daily_cap=min(resource_caps) if resource_caps and intent.resource else None)
+                except ReservationError as e:
+                    final_action = "DENY"
+                    decision.layer = "budget"
+                    decision.reasons.append(str(e))
+            else:
+                self._spent[spent_key] = spent + intent.amount
+            if final_action == "ALLOW" and mandate_id:
                 self._used_mandates.add(mandate_id)   # 单次消费
 
         return self._finalize(decision, final_action, human_said, intent,
                               agent_id, owner, policy_refs, spent, today,
-                              mandate_id=mandate_id, challenge=challenge)
+                              mandate_id=mandate_id, challenge=challenge,
+                              reservation=reservation)
 
     # ---- 收尾：计账 + 审计 + 返回 ------------------------------------
     def _finalize(self, decision: Decision, final_action: str, human_said,
                   intent: PaymentIntent, agent_id, owner, policy_refs,
-                  spent: float, today: str, mandate_id=None, challenge=None) -> dict:
+                  spent: float, today: str, mandate_id=None, challenge=None,
+                  reservation: dict | None = None) -> dict:
+        record_intent = {"amount": intent.amount, "recipient": intent.recipient,
+                         "purpose": intent.purpose}
+        optional_intent = {
+            "expected_amount": intent.expected_amount,
+            "expected_recipient": intent.expected_recipient,
+            "resource": intent.resource, "method": intent.method,
+            "network": intent.network, "asset": intent.asset,
+        }
+        record_intent.update({k: v for k, v in optional_intent.items() if v not in (None, "")})
         record = {
             "id": uuid.uuid4().hex[:12],
             "ts": datetime.now().isoformat(timespec="seconds"),
-            "intent": {"amount": intent.amount, "recipient": intent.recipient,
-                       "purpose": intent.purpose},
+            "intent": record_intent,
             "agent_id": agent_id, "owner": owner,
             "layer": decision.layer,
             "raw_decision": decision.action,
@@ -208,7 +248,9 @@ class Gateway:
             "reasons": decision.reasons,
             "policy_refs": policy_refs,
             "mandate_id": mandate_id,
-            "spent_today_after": round(self._spent.get(self._spent_key(owner, today), 0.0), 2),
+            "evaluation_id": (reservation or {}).get("evaluation_id"),
+            "reservation_status": (reservation or {}).get("reservation_status"),
+            "spent_today_after": round(self.spent_today(owner), 6),
         }
         with AUDIT_LOG.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -218,12 +260,30 @@ class Gateway:
                "human": human_said, "audit_id": record["id"],
                "policy_refs": policy_refs, "mandate_id": mandate_id,
                "spent_today": record["spent_today_after"]}
+        if reservation:
+            out.update({"evaluation_id": reservation["evaluation_id"],
+                        "reservation_status": reservation["reservation_status"],
+                        "reservation_expires_at": reservation["reservation_expires_at"]})
         if challenge:
             out["challenge"] = challenge   # ASK：交用户签名的 challenge
         if self.verdict_signer is not None:
             # 平台签名凭证：任何第三方可离线验证这个判定确实发生
             out["credential"] = self.verdict_signer.sign(out, record["intent"], owner)
+        if reservation:
+            # Secret capability token stays outside the signed/public credential and audit log.
+            out["reservation_token"] = reservation["reservation_token"]
         return out
+
+    def settle_evaluation(self, evaluation_id: str, reservation_token: str,
+                          settlement_ref: str) -> dict:
+        if not self.ledger:
+            raise RuntimeError("persistent ledger is not configured")
+        return self.ledger.settle(evaluation_id, reservation_token, settlement_ref)
+
+    def release_evaluation(self, evaluation_id: str, reservation_token: str) -> dict:
+        if not self.ledger:
+            raise RuntimeError("persistent ledger is not configured")
+        return self.ledger.release(evaluation_id, reservation_token)
 
     @property
     def policy_summary(self) -> dict:

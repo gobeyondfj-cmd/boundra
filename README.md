@@ -26,12 +26,14 @@ Two run modes:
 
 ![Boundra data flow](docs/dataflow.png)
 
-Policies and keys stay with the user; the gateway is read-only; only hash
-commitments go on-chain. Revocation is free — forever, no exceptions.
+Private keys stay with the user; the gateway is read-only; optional on-chain
+commits contain hashes, never policy plaintext. Hosted MCP stores the signed
+policy document you submit; self-hosted mode keeps it local. Revocation is free
+— forever, no exceptions.
 
 > **Integrating Boundra into your agent?** See
-> [docs/INTEGRATION.md](docs/INTEGRATION.md) — hosted API, x402 SDK hook,
-> and MCP paths with tested code.
+> [docs/INTEGRATION.md](docs/INTEGRATION.md) — hosted API, fail-closed Python
+> and TypeScript x402 SDKs, two-phase budget settlement, and MCP paths.
 
 ## See it run in 60 seconds
 
@@ -86,9 +88,9 @@ it and shows you exactly what will be enforced — before anything is signed.
 **3 · Sign & publish**
 
 You sign the policy document with your wallet key (EIP-191). It is published
-as a versioned document and a hash commitment is anchored on-chain. From this
-moment the gateway is read-only for every agent — changing the policy without
-your key is impossible.
+as a versioned, hash-chained document. The default commitment is a local hash
+log; Base Sepolia anchoring is optional. From this moment the gateway is
+read-only for every agent — changing the policy without your key is impossible.
 
 **4 · Mount the MCP server into your agent**
 
@@ -173,7 +175,11 @@ boundra/
 ├── templates.py              ★ policy template library (personal assistant / travel / dev API / procurement)
 ├── chain_anchor.py           ★ anchor backends: local simulation + real Base Sepolia (web3)
 ├── gateway.py                gateway core v3: 4-layer stacking + token verification + Mandate + revocation
+├── spend_ledger.py           ★ SQLite atomic reservations → settlement / release, with capability tokens
+├── usage_metrics.py          persistent hosted evaluation, usage and revenue counters
 ├── rail_adapters.py          ★ rail adapter layer: evaluation core decoupled from settlement rails (x402 first)
+├── boundra_x402.py           ★ async Python client + fail-closed x402 pre-sign hook
+├── sdk/typescript/           ★ equivalent TypeScript client and x402 hook, with tests
 ├── mcp_server.py             ★ standard MCP server (11 tools, stdio)
 ├── boundra_cli.py            ★ boundra-init (policy wizard) + boundra-approve (challenge signer)
 ├── contracts/
@@ -187,8 +193,12 @@ boundra/
 │   ├── setup_wallets.py      Base Sepolia test wallet generation
 │   └── demo.py / merchant.py / agent.py   offline simulation (zero dependencies)
 ├── tests/
-│   ├── test_product.py       ★ product tests (22 assertions)
-│   └── test_mcp_client.py    MCP protocol-level tests
+│   ├── test_product.py       ★ product tests (28 assertions)
+│   ├── test_mcp_client.py    MCP protocol-level tests
+│   ├── test_reservation_sdk.py  atomic budget, metrics and Python SDK tests
+│   ├── test_vectors.py       CC0 policy / ledger / approval consistency vectors
+│   ├── vectors/              machine-readable CC0 conformance fixtures
+│   └── run_semantic_eval.py  reproducible injection-corpus metrics (no LLM)
 ├── docs/
 │   ├── dataflow.png          data-flow diagram (English)
 │   └── render_*.py           diagram renderers (architecture / flow / use-case / data flow)
@@ -217,8 +227,9 @@ user private key signature ──→ PolicyDocument (NL rule + compiled artifact
   (per-agent rules); the strictest verdict wins
 - **Every version bump is a signature**: v2 must reference v1's hash; tampering
   with any historical version → signature invalid + chain broken
-- **Privacy shape**: only hash commitments go on-chain; policy plaintext never
-  leaves the device unless the user chooses to disclose
+- **Privacy shape**: optional on-chain commitments contain only hashes. Hosted
+  MCP stores the signed policy document submitted by the user; self-hosted mode
+  keeps policy plaintext on the user's device
 
 Run: `.venv/bin/python demo/demo_policy.py`
 
@@ -229,12 +240,15 @@ Every `evaluate_payment` response carries a `credential` — a
 "who can prove this ALLOW / DENY / ASK actually happened, under this policy,
 for this exact payment intent?"
 
-- **Binds the intent**: `intent_hash` = sha256 over the canonical
-  {amount, recipient, purpose} — a credential cannot be re-attached to a
-  different payment
+- **Binds the intent and expectations**: `intent_hash` covers the legacy
+  {amount, recipient, purpose} plus any supplied quote / expectation fields
+  (expected amount/payee, resource, method, network, asset). The credential also
+  carries explicit `quote`, `expectation`, and `expectation_source` fields
 - **Binds the policy**: `policy_refs` lists the policy version hashes used,
-  comparable against on-chain anchors
-- **Binds the audit log**: `audit_id` links to the server-side audit entry
+  comparable against local or optional on-chain anchors
+- **Binds evaluation state**: `audit_id`, `evaluation_id`, and
+  `reservation_status` link the decision to its audit and budget lifecycle;
+  the secret reservation token is deliberately excluded
 - **Verifiable offline, by anyone**: strip `proof`, canonicalize the payload
   (sorted keys, compact separators), recover the EIP-191 signer — it must
   equal `issuer` **and** the platform address
@@ -250,11 +264,23 @@ ok, why = verify_credential(verdict["credential"])   # offline, no API call
 Self-hosted gateways attach no credential unless `BOUNDRA_VERDICT_KEY` is set —
 unsigned mode stays fully backward compatible.
 
+## Two-phase budget accounting
+
+For hosted calls with an `owner`, ALLOW atomically reserves budget in SQLite and
+returns `evaluation_id` plus a private `reservation_token`. After the real rail
+settles, call `POST /evaluations/{id}/settle` with the transaction reference. If
+payment fails or is abandoned, call `/release` to restore the allowance. Tokens
+are SHA-256 hashed at rest and never enter audit logs or signed credentials.
+Unconfirmed reservations expire after 15 minutes; duplicate settlement is
+idempotent and cannot spend the same reservation twice.
+
 ## MCP server tools
 
 | Tool | Purpose | Caller |
 |------|---------|--------|
 | `evaluate_payment` | Pre-payment evaluation. ALLOW proceeds / DENY aborts / **ASK** returns a challenge the user signs; retry with `approval_token` | Agent |
+| `settle_evaluation` / `release_evaluation` | Confirm actual settlement or restore an unused reservation | Agent with capability token |
+| `get_evaluation` | Inspect reservation / settlement state | Agent |
 | `set_policy` | **Privileged**: submit a new policy version; requires the owner's EIP-191 signature | User only |
 | `revoke_policy` | **Privileged**: revoke a policy chain (default-deny immediately, free forever) | User only |
 | `get_policy_versions` | Policy version history (chain + hashes, comparable with on-chain commitments) | Anyone |
@@ -297,8 +323,11 @@ produce a signed approval token.
    native hook (demonstrated in `demo/demo_real.py`; the hook fires inside the SDK,
    before signing). Endgame: compile the deterministic parts of policy into a
    smart-contract wallet module, enforced at the settlement layer.
-3. **Semantic detection is regex-based** — production should swap in LLM
-   evaluation + intent anchoring.
+3. **Semantic detection is deterministic regex, not an LLM** — the included
+   30-case corpus currently reports 15 TP / 15 TN / 0 FP / 0 FN (baseline before
+   rule tuning: 9 TP / 14 TN / 1 FP / 6 FN). This small, self-authored corpus is
+   a regression benchmark, not evidence of real-world detection rates. Run
+   `.venv/bin/python tests/run_semantic_eval.py` and inspect `evaluations/`.
 4. **Anchoring defaults to a local log** — the real contract
    (`contracts/PolicyAnchor.sol`) and web3 client (`chain_anchor.BaseSepoliaAnchor`)
    are ready; set `chain_config.json` to switch to the real chain (deploy via
@@ -320,13 +349,15 @@ accounting, revenue ledger) runs from the private `boundra-ops` repo.
 
 ## Verified / not yet verified
 
-**Verified** (all of `test_product.py` 22 assertions + `test_mcp_client.py` pass):
-4-layer policy stacking (platform red lines × user × agent × Mandate) with
-strictest-wins; signed approval tokens (valid passes, forged rejected,
-intent-rebinding rejected, replay rejected); Mandate single-use; revocation
-defaults to deny and a signed v2 restores; template render+compile; all MCP
-tools over the wire; gateway blocks an injection attack inside the real x402
-402 round-trip before the SDK signs; the full tiered-pricing loop — first
+**Verified** (`test_product.py` 28 assertions + MCP protocol tests + 11 CC0
+vectors + Python/TypeScript SDK tests): 4-layer policy stacking (platform red
+lines × user × agent × Mandate) with strictest-wins; signed approval tokens
+(valid passes, forged rejected, intent-rebinding rejected, replay rejected);
+Mandate single-use; revocation defaults to deny and a signed v2 restores;
+template render+compile; atomic reservation / release / idempotent settlement;
+fail-closed SDK hooks; all MCP tools over the wire; gateway blocks an injection
+attack inside the real x402 402 round-trip before the SDK signs; the full
+tiered-pricing loop — first
 proven on Base Sepolia (2026-10-16), then on **Base mainnet (2026-10-21)**:
 free tier passes, paid tier settles $0.003 USDC for real (buyer 1.010 → 1.007,
 platform address credited 0.003), dogfood hook self-evaluates, semantic layer

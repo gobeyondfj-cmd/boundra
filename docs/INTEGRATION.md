@@ -46,57 +46,57 @@ Decisions:
 - **ALLOW** — proceed to signing
 - **ASK** — a human must sign an approval token for this exact intent
 - **DENY** — abort. Nothing was signed, nothing settles, zero on-chain trace
+- **INDETERMINATE** — invalid or incomplete input; do not sign
+
+For hosted calls with an `owner`, ALLOW also returns `evaluation_id` and a
+private `reservation_token`. After actual settlement call
+`POST /evaluations/{evaluation_id}/settle` with `reservation_token` and
+`settlement_ref`; after failure/abandonment call `/release` with the token.
+Do not expose the token in logs or credentials. Unconfirmed reservations expire
+after 15 minutes.
 
 ## B · Policy inside the x402 SDK (recommended)
 
-If your agent pays with the x402 Python SDK, run Boundra **inside the
-payment-creation hook** — the verdict arrives after the 402 challenge but
-*before your agent signs anything*:
+The Python and TypeScript SDKs are **fail-closed**: network errors, malformed
+responses, DENY and unresolved ASK all abort before payment creation. Only an
+explicit ALLOW permits signing.
+
+Python:
 
 ```python
-import httpx
-from eth_account import Account
-from x402 import x402Client
-from x402.http.clients.httpx import wrapHttpxWithPayment
-from x402.mechanisms.evm.exact.register import register_exact_evm_client
-from x402.mechanisms.evm.signers import EthAccountSigner
-from x402.schemas.hooks import AbortResult
+from boundra_x402 import BoundraClient, create_x402_hook
 
-account = Account.from_key(YOUR_AGENT_PRIVATE_KEY)
-client = x402Client()
-register_exact_evm_client(client, EthAccountSigner(account), networks="eip155:8453")
-
-async def boundra_gate(ctx):
-    req = ctx.selected_requirements
-    amount_usd = int(req.amount) / 1e6
-    async with httpx.AsyncClient(timeout=30) as http:
-        r = await http.post(
-            "https://api.boundra.io/evaluate/basic",          # free
-            json={"intent": {"amount": amount_usd,
-                             "recipient": req.pay_to,
-                             "purpose": "x402 payment via Boundra-gated agent"}},
-        )
-    verdict = r.json()
-    if verdict.get("decision") == "ALLOW":
-        return None                                          # proceed to signing
-    return AbortResult(reason="boundra",
-                       message="; ".join(verdict.get("reasons") or ["DENY"]))
-
-client.on_before_payment_creation(boundra_gate)
-
-async with wrapHttpxWithPayment(client) as http:
-    resp = await http.get("https://any-x402-merchant.example/paid-endpoint")
+boundra = BoundraClient(owner=OWNER_WALLET, agent_id="data-bot-v1")
+client.on_before_payment_creation(create_x402_hook(
+    boundra,
+    purpose="buy weather data",
+    expected_amount=0.01,                 # independent caller-side expectation
+    expected_recipient=EXPECTED_PAYEE,
+    semantic=True,                        # rule-based injection + drift checks
+))
 ```
 
-Use `/evaluate/semantic` instead of `/basic` when you also want the merchant's
-response content scanned for injection (pass it as `source_content`).
+TypeScript (`sdk/typescript` in this repository):
+
+```ts
+import { BoundraClient, createX402Hook } from "@boundra/x402";
+const boundra = new BoundraClient({ owner: OWNER_WALLET, agentId: "data-bot-v1" });
+client.onBeforePaymentCreation(createX402Hook(boundra, {
+  purpose: "buy weather data",
+  expectedAmount: 0.01,
+  expectedRecipient: EXPECTED_PAYEE,
+  semantic: true,
+}));
+```
+
+Pass `approval_handler` (Python) or `approve` (TypeScript) to turn an ASK
+challenge into a wallet-signed token. The browser approval tool at
+`https://boundra.io/#approve` and `boundra-approve` use the same canonical JSON
+as the gateway; private keys never leave the user's wallet/device.
 
 > **About ASK:** the hosted default policy asks a human whenever the recipient
 > is not on the whitelist — paying an arbitrary x402 merchant will return
-> `ASK`, not `ALLOW`. That is the system working as designed. Handle it by
-> either collecting a [signed approval token](../README.md#the-complete-flow-step-by-step)
-> (`boundra-approve`), or by running the MCP path below and ALLOW-listing your
-> known merchants in your own signed policy.
+> `ASK`, not `ALLOW`. Publish your own signed policy for known merchants.
 
 ## C · MCP server
 
@@ -117,7 +117,8 @@ Point any streamable-HTTP MCP client at our hosted multi-tenant endpoint:
 Multi-tenant by design: every tool call is namespaced by your wallet
 (`owner`). No signed policy on file → **default-deny**. Publish your policy
 with `set_policy` (signed by the owner's key), then `evaluate_payment` before
-every spend. Spend counters are per-owner; policies persist across restarts.
+every spend. Atomic reservations and policies persist across restarts; settle
+or release each ALLOW after the real payment outcome is known.
 
 ### C2 · Self-hosted MCP (full policy lifecycle locally)
 
@@ -139,13 +140,14 @@ Then run the 2-minute wizard to bind a wallet, pick a policy template, and
 sign it:
 
 ```bash
-uvx --from git+https://github.com/gobeyondfj-cmd/boundra boundra-init     # wallet → template → sign → anchor
+uvx --from git+https://github.com/gobeyondfj-cmd/boundra boundra-init     # wallet → template → sign → local hash log / optional anchor
 uvx --from git+https://github.com/gobeyondfj-cmd/boundra boundra-approve  # sign an ASK challenge
 ```
 
-Available tools: `set_policy` · `evaluate_payment` · `get_policy` ·
-`revoke_policy` (free forever) · `get_spend_report` · `get_audit_trail` ·
-`get_policy_versions` — see the [README](../README.md#mcp-server-tools).
+Available tools: `set_policy` · `evaluate_payment` · `settle_evaluation` ·
+`release_evaluation` · `get_evaluation` · `get_policy` · `revoke_policy` (free
+forever) · `get_spend_report` · `get_audit_trail` · `get_policy_versions` — see
+the [README](../README.md#mcp-server-tools).
 
 ---
 
@@ -190,9 +192,11 @@ def verify(credential: dict) -> bool:
 ```
 
 The credential binds the exact payment intent (`intent_hash` = sha256 over
-canonical {amount, recipient, purpose}), the policy versions used
-(`policy_refs`), and the server-side audit entry (`audit_id`). Re-attaching it
-to a different payment or tampering with any field breaks the signature.
+canonical {amount, recipient, purpose} plus any supplied expectation/quote
+fields), policy versions (`policy_refs`), audit entry (`audit_id`), evaluation
+state, quote, expectation, and expectation provenance. Legacy three-field
+hashes remain compatible. Re-attaching or tampering with any field breaks the
+signature; the private reservation token is never signed or logged.
 
 The platform issuer address is published at
 `GET https://api.boundra.io/verdict-key` and is the same address that receives

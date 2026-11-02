@@ -81,7 +81,9 @@ def new_document(owner: str, scope: str, agent_id: str | None,
                          compiled={"per_tx_max": compiled.per_tx_max,
                                    "daily_budget": compiled.daily_budget,
                                    "allowed_recipients": compiled.allowed_recipients,
-                                   "require_approval_above": compiled.require_approval_above},
+                                   "require_approval_above": compiled.require_approval_above,
+                                   "expected_amount_tolerance": compiled.expected_amount_tolerance,
+                                   "per_resource_daily_budget": compiled.per_resource_daily_budget},
                          prev_hash=prev_hash)
     return doc.finalize()
 

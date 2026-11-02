@@ -1,0 +1,85 @@
+{
+  "schema": "boundra.policy-vectors/v1",
+  "license": "CC0-1.0",
+  "rule": "Daily spend cap $10, max $10 per transaction; only pay whitelisted providers (api.weather.com, 0x55107627AC3535Cc1d19D36DFEf0B70e30A34A22); any payment above $5 requires my approval; per-resource daily cap $1",
+  "vectors": [
+    {
+      "id": "P-01-exact-quote-unchanged",
+      "category": "policy",
+      "intent": {"amount": 0.01, "recipient": "api.weather.com", "purpose": "weather", "expected_amount": 0.01},
+      "expect": {"decision": "ALLOW", "layer": "pass"}
+    },
+    {
+      "id": "P-02-raised-price",
+      "category": "policy",
+      "intent": {"amount": 0.02, "recipient": "api.weather.com", "purpose": "weather", "expected_amount": 0.01},
+      "expect": {"decision": "DENY", "layer": "semantic"}
+    },
+    {
+      "id": "P-03-lower-price-is-mismatch-not-attack-label",
+      "category": "policy",
+      "intent": {"amount": 0.005, "recipient": "api.weather.com", "purpose": "weather", "expected_amount": 0.01},
+      "expect": {"decision": "DENY", "layer": "semantic"}
+    },
+    {
+      "id": "P-04-payee-replaced",
+      "category": "policy",
+      "intent": {"amount": 0.01, "recipient": "api.weather.com", "purpose": "weather", "expected_recipient": "data.news.io"},
+      "expect": {"decision": "DENY", "layer": "semantic"}
+    },
+    {
+      "id": "P-05-evm-checksum-case-insensitive",
+      "category": "policy",
+      "intent": {"amount": 0.01, "recipient": "0x55107627ac3535cc1d19d36dfef0b70e30a34a22", "purpose": "weather", "expected_recipient": "0x55107627AC3535Cc1d19D36DFEf0B70e30A34A22"},
+      "expect": {"decision": "ALLOW", "layer": "pass"}
+    },
+    {
+      "id": "P-06-first-quote-is-not-implicitly-authorized",
+      "category": "policy",
+      "intent": {"amount": 0.01, "recipient": "api.weather.com", "purpose": "weather"},
+      "expect": {"decision": "ALLOW", "layer": "pass"}
+    },
+    {
+      "id": "P-07-resource-within-cap",
+      "category": "policy",
+      "resource_spent_today": 0.75,
+      "intent": {"amount": 0.25, "recipient": "api.weather.com", "purpose": "weather", "resource": "https://api.weather.com/data"},
+      "expect": {"decision": "ALLOW", "layer": "pass"}
+    },
+    {
+      "id": "P-08-resource-gradual-overspend",
+      "category": "policy",
+      "resource_spent_today": 0.75,
+      "intent": {"amount": 0.26, "recipient": "api.weather.com", "purpose": "weather", "resource": "https://api.weather.com/data"},
+      "expect": {"decision": "DENY", "layer": "budget"}
+    },
+    {
+      "id": "P-09-domain-recipient-case-remains-exact",
+      "category": "policy",
+      "intent": {"amount": 0.01, "recipient": "API.weather.com", "purpose": "weather", "expected_recipient": "api.weather.com"},
+      "expect": {"decision": "DENY", "layer": "semantic"}
+    },
+    {
+      "id": "L-01-reserve-release-settle-and-duplicate-settlement",
+      "category": "ledger",
+      "daily_cap": 2,
+      "resource_cap": 1,
+      "operations": [
+        {"op": "reserve", "amount": 0.6, "resource": "api", "save": "a", "expect": "reserved"},
+        {"op": "reserve", "amount": 0.6, "resource": "api", "expect": "DENY"},
+        {"op": "release", "ref": "a", "expect": "released"},
+        {"op": "reserve", "amount": 0.6, "resource": "api", "save": "b", "expect": "reserved"},
+        {"op": "settle", "ref": "b", "settlement_ref": "0xtx", "expect": "settled"},
+        {"op": "settle", "ref": "b", "settlement_ref": "0xtx", "expect": "settled"},
+        {"op": "spent", "expect": 0.6}
+      ]
+    },
+    {
+      "id": "A-01-signed-approval-and-replay",
+      "category": "approval",
+      "rule": "Daily spend cap $10, max $10 per transaction; only pay whitelisted providers (api.weather.com); any payment above $5 requires my approval",
+      "intent": {"amount": 6, "recipient": "api.weather.com", "purpose": "weather"},
+      "expect": {"initial": "ASK", "approved": "ALLOW", "replayed": "DENY"}
+    }
+  ]
+}
