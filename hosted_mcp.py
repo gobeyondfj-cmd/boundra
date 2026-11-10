@@ -19,8 +19,11 @@ import os
 import sys
 from datetime import date
 from pathlib import Path
+from typing import Annotated
 
 from mcp.server.mcpserver import MCPServer
+from mcp.types import ToolAnnotations
+from pydantic import Field
 
 sys.path.insert(0, str(Path(__file__).parent))
 from gateway import AUDIT_LOG, Gateway
@@ -58,26 +61,47 @@ server = MCPServer(
 )
 
 
+OwnerArg = Annotated[str, Field(description="Owner wallet address that scopes policy, budget and audit state")]
+OptionalOwnerArg = Annotated[str | None, Field(description="Owner wallet address; required for a persistent hosted budget reservation")]
+AgentArg = Annotated[str, Field(description="Stable identifier of the agent requesting this operation")]
+OptionalAgentArg = Annotated[str | None, Field(description="Optional agent identifier for agent-scoped policy or attribution")]
+EvaluationArg = Annotated[str, Field(description="Evaluation identifier returned by an ALLOW verdict")]
+ReservationTokenArg = Annotated[str, Field(description="Private reservation capability returned with the evaluation; never log or publish it")]
+
+READ_TOOL = ToolAnnotations(
+    readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+WRITE_TOOL = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+IDEMPOTENT_WRITE_TOOL = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+REVOCATION_TOOL = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+
+
 # ---------------------------------------------------------------- Agent 日常
 
 @server.tool(description=(
     "Evaluate a payment intent. MUST be called before executing any payment. "
     "ALLOW = you may pay; DENY = you must abandon; ASK = a challenge is returned — "
     "relay the reason to the user, then retry with approval_token once the user signs. "
-    "An optional mandate parameter carries a user-issued single-task authorization."))
-def evaluate_payment(amount: float, recipient: str, purpose: str,
-                     expected_amount: float | None = None,
-                     expected_recipient: str | None = None,
-                     resource: str | None = None,
-                     method: str | None = None,
-                     network: str | None = None,
-                     asset: str | None = None,
-                     source_content: str = "",
-                     approval_token: str | None = None,
-                     owner: str | None = None,
-                     agent_id: str | None = None,
-                     mandate: dict | None = None,
-                     purchase_id: str | None = None) -> str:
+    "An optional mandate parameter carries a user-issued single-task authorization."),
+    annotations=WRITE_TOOL)
+def evaluate_payment(
+        amount: Annotated[float, Field(description="Payment amount in USDC or the policy's accounting unit")],
+        recipient: Annotated[str, Field(description="Payee address, host or recipient identifier to evaluate")],
+        purpose: Annotated[str, Field(description="Human-readable reason for this purchase")],
+        expected_amount: Annotated[float | None, Field(description="Caller-accepted price; deterministic checks reject a different declared amount")] = None,
+        expected_recipient: Annotated[str | None, Field(description="Caller-approved payee; deterministic checks reject substitution")] = None,
+        resource: Annotated[str | None, Field(description="Resource URL or host/path used for per-endpoint budgets")] = None,
+        method: Annotated[str | None, Field(description="HTTP method of the paid resource, such as GET or POST")] = None,
+        network: Annotated[str | None, Field(description="CAIP-2 payment network, for example eip155:8453")] = None,
+        asset: Annotated[str | None, Field(description="Payment asset identifier or contract address")] = None,
+        source_content: Annotated[str, Field(description="Merchant content that triggered payment; semantic evaluation scans it for injection and drift")] = "",
+        approval_token: Annotated[str | None, Field(description="Wallet-signed approval token for the exact ASK challenge and payment intent")] = None,
+        owner: OptionalOwnerArg = None,
+        agent_id: OptionalAgentArg = None,
+        mandate: Annotated[dict | None, Field(description="Optional user-issued single-task payment mandate object")] = None,
+        purchase_id: Annotated[str | None, Field(description="Caller-generated ID for one logical purchase; concurrent duplicates cannot obtain a second ALLOW")] = None) -> str:
     verdict = gateway.handle_tool_call("evaluate_payment", {
         "intent": {"amount": amount, "recipient": recipient, "purpose": purpose,
                    "expected_amount": expected_amount,
@@ -96,9 +120,12 @@ def evaluate_payment(amount: float, recipient: str, purpose: str,
 @server.tool(description=(
     "Confirm that an ALLOWed payment settled. Requires the evaluation_id and the "
     "reservation_token returned by evaluate_payment, plus the real transaction/hash reference. "
-    "Idempotent for the same evaluation; never call this before settlement."))
-def settle_evaluation(evaluation_id: str, reservation_token: str,
-                      settlement_ref: str) -> str:
+    "Idempotent for the same evaluation; never call this before settlement."),
+    annotations=IDEMPOTENT_WRITE_TOOL)
+def settle_evaluation(
+        evaluation_id: EvaluationArg,
+        reservation_token: ReservationTokenArg,
+        settlement_ref: Annotated[str, Field(description="Real transaction hash or facilitator settlement reference")]) -> str:
     try:
         result = gateway.settle_evaluation(evaluation_id, reservation_token, settlement_ref)
     except (PermissionError, RuntimeError, ValueError) as e:
@@ -108,8 +135,11 @@ def settle_evaluation(evaluation_id: str, reservation_token: str,
 
 @server.tool(description=(
     "Release a reserved ALLOW budget when the payment failed or was abandoned. "
-    "Requires the evaluation_id and reservation_token returned by evaluate_payment."))
-def release_evaluation(evaluation_id: str, reservation_token: str) -> str:
+    "Requires the evaluation_id and reservation_token returned by evaluate_payment."),
+    annotations=IDEMPOTENT_WRITE_TOOL)
+def release_evaluation(
+        evaluation_id: EvaluationArg,
+        reservation_token: ReservationTokenArg) -> str:
     try:
         result = gateway.release_evaluation(evaluation_id, reservation_token)
     except (PermissionError, RuntimeError, ValueError) as e:
@@ -117,8 +147,9 @@ def release_evaluation(evaluation_id: str, reservation_token: str) -> str:
     return json.dumps(result, ensure_ascii=False)
 
 
-@server.tool(description="Inspect the reservation/settlement state of an evaluation")
-def get_evaluation(evaluation_id: str) -> str:
+@server.tool(description="Inspect the reservation/settlement state of an evaluation",
+             annotations=READ_TOOL)
+def get_evaluation(evaluation_id: EvaluationArg) -> str:
     result = gateway.ledger.get(evaluation_id) if gateway.ledger else None
     return json.dumps(result or {"error": "evaluation not found"}, ensure_ascii=False)
 
@@ -126,8 +157,11 @@ def get_evaluation(evaluation_id: str) -> str:
 @server.tool(description=(
     "[For agents] Ask the user for a policy/budget change (e.g. 'raise daily budget from 50 to 80'). "
     "The request is queued for user approval; the user signs and publishes a new policy version. "
-    "Agents can NEVER change policy directly."))
-def request_policy_change(agent_id: str, request: str, reason: str) -> str:
+    "Agents can NEVER change policy directly."), annotations=WRITE_TOOL)
+def request_policy_change(
+        agent_id: AgentArg,
+        request: Annotated[str, Field(description="Requested policy or budget change in natural language")],
+        reason: Annotated[str, Field(description="Evidence or explanation for why the change is needed")]) -> str:
     import time
     import uuid
     req = {"id": uuid.uuid4().hex[:10], "agent_id": agent_id, "request": request,
@@ -137,8 +171,9 @@ def request_policy_change(agent_id: str, request: str, reason: str) -> str:
                        "note": "queued for user approval"}, ensure_ascii=False)
 
 
-@server.tool(description="View the active signed payment policy for an owner (and optionally an agent scope)")
-def get_policy(owner: str, agent_id: str | None = None) -> str:
+@server.tool(description="View the active signed payment policy for an owner (and optionally an agent scope)",
+             annotations=READ_TOOL)
+def get_policy(owner: OwnerArg, agent_id: OptionalAgentArg = None) -> str:
     out = {}
     for scope, aid in (("user", None), ("agent", agent_id)):
         if scope == "agent" and not aid:
@@ -152,16 +187,19 @@ def get_policy(owner: str, agent_id: str | None = None) -> str:
     return json.dumps(out, ensure_ascii=False)
 
 
-@server.tool(description="View today's spend summary for an owner")
-def get_spend_report(owner: str) -> str:
+@server.tool(description="View today's spend summary for an owner", annotations=READ_TOOL)
+def get_spend_report(owner: OwnerArg) -> str:
     today = date.today().isoformat()
     spent = gateway.spent_today(owner)
     return json.dumps({"date": today, "owner": owner, "spent": round(spent, 2)},
                       ensure_ascii=False)
 
 
-@server.tool(description="View recent payment-approval audit records for an owner")
-def get_audit_trail(owner: str, limit: int = 10) -> str:
+@server.tool(description="View recent payment-approval audit records for an owner",
+             annotations=READ_TOOL)
+def get_audit_trail(
+        owner: OwnerArg,
+        limit: Annotated[int, Field(description="Maximum number of most recent audit records to return")] = 10) -> str:
     if not AUDIT_LOG.exists():
         return "[]"
     records = [json.loads(x) for x in AUDIT_LOG.read_text(encoding="utf-8").splitlines()]
@@ -184,10 +222,16 @@ def _compiled(nl_rule: str) -> dict:
 @server.tool(description=(
     "[USER ONLY] Submit a new policy version. Must carry the user's wallet EIP-191 signature "
     "over the policy document; accepted only after signature + version-chain checks pass. "
-    "Agents MUST NOT call this tool."))
-def set_policy(owner: str, scope: str, version: int, nl_rule: str,
-               prev_hash: str, created_at: float, signature: str,
-               agent_id: str | None = None) -> str:
+    "Agents MUST NOT call this tool."), annotations=WRITE_TOOL)
+def set_policy(
+        owner: OwnerArg,
+        scope: Annotated[str, Field(description="Policy scope: user for the owner default or agent for one agent")],
+        version: Annotated[int, Field(description="Monotonically increasing policy version number")],
+        nl_rule: Annotated[str, Field(description="Natural-language spending rule to compile and enforce")],
+        prev_hash: Annotated[str, Field(description="Previous policy hash, or 64 zero characters for a genesis policy")],
+        created_at: Annotated[float, Field(description="Policy creation time as a Unix timestamp in seconds")],
+        signature: Annotated[str, Field(description="Owner wallet EIP-191 signature over the policy document")],
+        agent_id: OptionalAgentArg = None) -> str:
     doc = PolicyDocument(owner=owner, scope=scope, agent_id=agent_id, version=version,
                          nl_rule=nl_rule, compiled=_compiled(nl_rule),
                          prev_hash=prev_hash, created_at=created_at,
@@ -202,10 +246,15 @@ def set_policy(owner: str, scope: str, version: int, nl_rule: str,
 
 @server.tool(description=(
     "[USER ONLY] Revoke a policy chain (takes effect immediately; subsequent payments "
-    "default to DENY). Must carry the user's wallet signature over the revocation statement."))
-def revoke_policy(owner: str, scope: str, revoked_through: int,
-                  created_at: float, signature: str,
-                  agent_id: str | None = None) -> str:
+    "default to DENY). Must carry the user's wallet signature over the revocation statement."),
+    annotations=REVOCATION_TOOL)
+def revoke_policy(
+        owner: OwnerArg,
+        scope: Annotated[str, Field(description="Policy scope to revoke: user or agent")],
+        revoked_through: Annotated[int, Field(description="Highest policy version covered by this revocation")],
+        created_at: Annotated[float, Field(description="Revocation creation time as a Unix timestamp in seconds")],
+        signature: Annotated[str, Field(description="Owner wallet signature over the revocation statement")],
+        agent_id: OptionalAgentArg = None) -> str:
     rec = Revocation(owner=owner, scope=scope, agent_id=agent_id,
                      revoked_through=revoked_through, created_at=created_at,
                      signature=signature)
@@ -216,28 +265,34 @@ def revoke_policy(owner: str, scope: str, revoked_through: int,
     return json.dumps(result, ensure_ascii=False)
 
 
-@server.tool(description="View a user's policy version history (version chain + hashes, verifiable against on-chain commitments)")
-def get_policy_versions(owner: str) -> str:
+@server.tool(description="View a user's policy version history (version chain + hashes, verifiable against on-chain commitments)",
+             annotations=READ_TOOL)
+def get_policy_versions(owner: OwnerArg) -> str:
     return json.dumps(gateway.store.history(owner), ensure_ascii=False, indent=2)
 
 
-@server.tool(description="List pending agent policy-change requests")
+@server.tool(description="List pending agent policy-change requests", annotations=READ_TOOL)
 def list_policy_requests() -> str:
     return json.dumps(policy_requests, ensure_ascii=False, indent=2)
 
 
 # ---------------------------------------------------------------- 定制辅助
 
-@server.tool(description="List policy templates (personal assistant / travel / dev API / procurement)")
+@server.tool(description="List policy templates (personal assistant / travel / dev API / procurement)",
+             annotations=READ_TOOL)
 def list_templates() -> str:
     import templates
     return json.dumps(templates.list_templates(), ensure_ascii=False, indent=2)
 
 
-@server.tool(description="Render a natural-language rule from a template + parameters (then compile, sign & publish)")
-def render_template(template_id: str, whitelist: list[str],
-                    daily: float | None = None, per_tx: float | None = None,
-                    ask_above: float | None = None) -> str:
+@server.tool(description="Render a natural-language rule from a template + parameters (then compile, sign & publish)",
+             annotations=READ_TOOL)
+def render_template(
+        template_id: Annotated[str, Field(description="Identifier returned by list_templates")],
+        whitelist: Annotated[list[str], Field(description="Approved recipient hosts, addresses or identifiers")],
+        daily: Annotated[float | None, Field(description="Optional total daily spending cap override")] = None,
+        per_tx: Annotated[float | None, Field(description="Optional per-transaction spending cap override")] = None,
+        ask_above: Annotated[float | None, Field(description="Optional amount above which human approval is required")] = None) -> str:
     import templates
     overrides = {k: v for k, v in {"daily": daily, "per_tx": per_tx,
                                    "ask_above": ask_above}.items() if v is not None}
