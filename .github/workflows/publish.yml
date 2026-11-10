@@ -29,6 +29,8 @@ jobs:
           curl -fL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
 
       - name: Publish to official MCP Registry
+        env:
+          MCP_REGISTRY_PRIVATE_KEY: ${{ secrets.MCP_REGISTRY_PRIVATE_KEY }}
         run: |
-          ./mcp-publisher login github-oidc
+          ./mcp-publisher login http --domain boundra.io --private-key "$MCP_REGISTRY_PRIVATE_KEY"
           ./mcp-publisher publish
