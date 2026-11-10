@@ -274,6 +274,16 @@ are SHA-256 hashed at rest and never enter audit logs or signed credentials.
 Unconfirmed reservations expire after 15 minutes; duplicate settlement is
 idempotent and cannot spend the same reservation twice.
 
+For concurrent payment creation, pass a caller-generated top-level `purchase_id`
+that identifies one logical purchase before fan-out. Within an owner, only its
+first atomic reservation can receive ALLOW. A same-ID replay returns DENY at the
+`idempotency` layer with the existing evaluation state and no reservation token;
+reusing the ID for different intent fields sets `purchase_id_conflict=true`.
+Different purchase IDs remain independent even when their quotes are identical.
+Omitting `purchase_id` preserves the original budget-only behavior. This is a
+shared pre-sign boundary, not post-sign chain reconciliation: after an ambiguous
+payment outcome, reconcile before creating another purchase attempt.
+
 ## MCP server tools
 
 | Tool | Purpose | Caller |

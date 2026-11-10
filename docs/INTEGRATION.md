@@ -55,6 +55,17 @@ private `reservation_token`. After actual settlement call
 Do not expose the token in logs or credentials. Unconfirmed reservations expire
 after 15 minutes.
 
+For concurrent payment creation, generate a random top-level `purchase_id` for
+each logical purchase **before fan-out** and share it only across attempts that
+belong to that purchase. The first atomic reservation for an
+`(owner, purchase_id)` can receive ALLOW; same-ID duplicates return DENY at the
+`idempotency` layer with the existing evaluation state and no new reservation
+token. Same ID + different intent fields returns `purchase_id_conflict=true`.
+Separate purchases must use separate IDs even if their quotes are identical.
+Calls without `purchase_id` retain the original budget-only behavior. After an
+ambiguous post-sign outcome, reconcile the real payment before retrying — the
+purchase ID is not a substitute for chain/facilitator reconciliation.
+
 ## B · Policy inside the x402 SDK (recommended)
 
 The Python and TypeScript SDKs are **fail-closed**: network errors, malformed
@@ -73,6 +84,7 @@ client.on_before_payment_creation(create_x402_hook(
     expected_amount=0.01,                 # independent caller-side expectation
     expected_recipient=EXPECTED_PAYEE,
     semantic=True,                        # rule-based injection + drift checks
+    purchase_id=PURCHASE_ID,              # one caller-owned ID per logical purchase
 ))
 ```
 
@@ -86,6 +98,7 @@ client.onBeforePaymentCreation(createX402Hook(boundra, {
   expectedAmount: 0.01,
   expectedRecipient: EXPECTED_PAYEE,
   semantic: true,
+  purchaseId: PURCHASE_ID,
 }));
 ```
 

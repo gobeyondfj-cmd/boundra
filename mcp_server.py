@@ -63,12 +63,14 @@ def evaluate_payment(amount: float, recipient: str, purpose: str,
                      owner: str | None = None,
                      agent_id: str | None = None,
                      mandate: dict | None = None,
+                     purchase_id: str | None = None,
                      human_approved: bool = False) -> str:   # deprecated，仅向后兼容
     verdict = gateway.handle_tool_call("evaluate_payment", {
         "intent": {"amount": amount, "recipient": recipient, "purpose": purpose,
                    "expected_amount": expected_amount, "source_content": source_content},
         "approval_token": approval_token, "owner": owner,
         "agent_id": agent_id, "mandate": mandate,
+        "purchase_id": purchase_id,
         "human_approved": human_approved,
     })
     return json.dumps(verdict, ensure_ascii=False)

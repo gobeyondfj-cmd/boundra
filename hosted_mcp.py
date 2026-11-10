@@ -76,7 +76,8 @@ def evaluate_payment(amount: float, recipient: str, purpose: str,
                      approval_token: str | None = None,
                      owner: str | None = None,
                      agent_id: str | None = None,
-                     mandate: dict | None = None) -> str:
+                     mandate: dict | None = None,
+                     purchase_id: str | None = None) -> str:
     verdict = gateway.handle_tool_call("evaluate_payment", {
         "intent": {"amount": amount, "recipient": recipient, "purpose": purpose,
                    "expected_amount": expected_amount,
@@ -86,6 +87,7 @@ def evaluate_payment(amount: float, recipient: str, purpose: str,
                    "source_content": source_content},
         "approval_token": approval_token, "owner": owner,
         "agent_id": agent_id, "mandate": mandate,
+        "purchase_id": purchase_id,
         "human_approved": False,   # 托管版禁用 legacy 自证审批
     })
     return json.dumps(verdict, ensure_ascii=False)

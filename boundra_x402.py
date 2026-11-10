@@ -57,7 +57,8 @@ class BoundraClient:
 
     async def evaluate(self, intent: dict, *, semantic: bool = False,
                        approval_token: str | None = None,
-                       mandate: dict | None = None) -> dict:
+                       mandate: dict | None = None,
+                       purchase_id: str | None = None) -> dict:
         body: dict[str, Any] = {"intent": intent}
         if self.owner:
             body["owner"] = self.owner
@@ -67,6 +68,8 @@ class BoundraClient:
             body["approval_token"] = approval_token
         if mandate:
             body["mandate"] = mandate
+        if purchase_id is not None:
+            body["purchase_id"] = purchase_id
         verdict = await self._post(
             "/evaluate/semantic" if semantic else "/evaluate/basic",
             body, semantic=semantic)
@@ -91,11 +94,13 @@ def create_x402_hook(client: BoundraClient, *, purpose: str,
                      expected_amount: float | None = None,
                      expected_recipient: str | None = None,
                      semantic: bool = False,
-                     approval_handler: ApprovalHandler | None = None):
+                     approval_handler: ApprovalHandler | None = None,
+                     purchase_id: str | None = None):
     """Build an x402 ``on_before_payment_creation`` hook.
 
     ``approval_handler`` receives the ASK verdict and returns a wallet-signed
     approval token (or None to abort). It may be synchronous or asynchronous.
+    ``purchase_id`` must identify one logical purchase, not a quote fingerprint.
     """
     adapter = X402Adapter()
 
@@ -103,7 +108,8 @@ def create_x402_hook(client: BoundraClient, *, purpose: str,
         try:
             rail = adapter.extract(
                 payment_ctx, purpose, expected_amount, expected_recipient)
-            verdict = await client.evaluate(rail.to_intent().__dict__, semantic=semantic)
+            verdict = await client.evaluate(
+                rail.to_intent().__dict__, semantic=semantic, purchase_id=purchase_id)
             if verdict.get("decision") == "ASK" and approval_handler:
                 token = approval_handler(verdict)
                 if inspect.isawaitable(token):
@@ -111,7 +117,7 @@ def create_x402_hook(client: BoundraClient, *, purpose: str,
                 if token:
                     verdict = await client.evaluate(
                         rail.to_intent().__dict__, semantic=semantic,
-                        approval_token=token)
+                        approval_token=token, purchase_id=purchase_id)
             if verdict.get("decision") == "ALLOW":
                 return None
             return adapter.abort(verdict)

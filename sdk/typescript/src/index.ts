@@ -54,13 +54,14 @@ export class BoundraClient {
     return await response.json() as T;
   }
 
-  async evaluate(intent: PaymentIntent, options: { semantic?: boolean; approvalToken?: string; mandate?: unknown } = {}): Promise<Verdict> {
+  async evaluate(intent: PaymentIntent, options: { semantic?: boolean; approvalToken?: string; mandate?: unknown; purchaseId?: string } = {}): Promise<Verdict> {
     const result = await this.post<Verdict>(options.semantic ? "/evaluate/semantic" : "/evaluate/basic", {
       intent,
       ...(this.owner ? { owner: this.owner } : {}),
       ...(this.agentId ? { agent_id: this.agentId } : {}),
       ...(options.approvalToken ? { approval_token: options.approvalToken } : {}),
       ...(options.mandate ? { mandate: options.mandate } : {}),
+      ...(options.purchaseId !== undefined ? { purchase_id: options.purchaseId } : {}),
     }, options.semantic);
     if (!result || !["ALLOW", "ASK", "DENY", "INDETERMINATE"].includes(result.decision)) {
       throw new Error("Boundra returned an invalid verdict");
@@ -100,6 +101,7 @@ export interface X402HookOptions {
   expectedAmount?: number;
   expectedRecipient?: string;
   semantic?: boolean;
+  purchaseId?: string;
   approve?: (verdict: Verdict) => Promise<string | undefined> | string | undefined;
 }
 
@@ -120,11 +122,13 @@ export function createX402Hook(client: BoundraClient, options: X402HookOptions) 
         asset: req.asset,
         source_content: context.paymentRequired?.resource?.description ?? "",
       };
-      let verdict = await client.evaluate(intent, { semantic: options.semantic });
+      let verdict = await client.evaluate(intent, {
+        semantic: options.semantic, purchaseId: options.purchaseId,
+      });
       if (verdict.decision === "ASK" && options.approve) {
         const token = await options.approve(verdict);
         if (token) verdict = await client.evaluate(intent, {
-          semantic: options.semantic, approvalToken: token,
+          semantic: options.semantic, approvalToken: token, purchaseId: options.purchaseId,
         });
       }
       if (verdict.decision === "ALLOW") return;

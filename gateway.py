@@ -14,6 +14,7 @@ legacy human_approved 自证模式保留仅为向后兼容，裁决中标记 dep
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -27,7 +28,7 @@ from mandate import Mandate, check_against_intent, verify_mandate
 from policy import (Decision, PaymentIntent, Policy, compile_policy, evaluate,
                     platform_check)
 from signed_policy import PolicyDocument, PolicyStore, Revocation
-from spend_ledger import ReservationError, SpendLedger
+from spend_ledger import DuplicateReservation, ReservationError, SpendLedger
 
 STATE_DIR = Path(os.environ.get("BOUNDRA_STATE_DIR") or (Path(__file__).parent / "state"))
 AUDIT_LOG = STATE_DIR / "audit.jsonl"
@@ -109,14 +110,15 @@ class Gateway:
             human_approved=args.get("human_approved", False),
             owner=args.get("owner"), agent_id=args.get("agent_id"),
             approval_token=args.get("approval_token"),
-            mandate=args.get("mandate"))
+            mandate=args.get("mandate"), purchase_id=args.get("purchase_id"))
 
     # ---- 核心：评估一笔支付意图 --------------------------------------
     def evaluate_payment(self, intent: PaymentIntent, mandate_context: dict | None = None,
                          human_approved: bool = False,
                          owner: str | None = None, agent_id: str | None = None,
                          approval_token: str | None = None,
-                         mandate: dict | None = None) -> dict:
+                         mandate: dict | None = None,
+                         purchase_id: str | None = None) -> dict:
         today = date.today().isoformat()
         spent_key = self._spent_key(owner, today)
         spent = self.spent_today(owner)
@@ -202,15 +204,37 @@ class Gateway:
                 daily_cap = min([p.daily_budget for p in policies] + [5000.0])
                 resource_caps = [p.per_resource_daily_budget for p in policies
                                  if p.per_resource_daily_budget is not None]
+                intent_digest = None
+                if purchase_id is not None:
+                    canonical = json.dumps(intent.__dict__, sort_keys=True,
+                                           separators=(",", ":"), ensure_ascii=False)
+                    intent_digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
                 try:
                     reservation = self.ledger.reserve(
                         owner=owner, agent_id=agent_id,
                         resource=intent.resource or intent.recipient,
                         amount=intent.amount, daily_cap=daily_cap,
-                        resource_daily_cap=min(resource_caps) if resource_caps and intent.resource else None)
+                        resource_daily_cap=min(resource_caps) if resource_caps and intent.resource else None,
+                        purchase_id=purchase_id, intent_digest=intent_digest)
+                except DuplicateReservation as e:
+                    final_action = "DENY"
+                    decision.layer = "idempotency"
+                    decision.reasons.append(str(e))
+                    reservation = {
+                        "evaluation_id": e.state["id"],
+                        "reservation_status": e.state["status"],
+                        "reservation_expires_at": e.state["expires_at"],
+                        "purchase_id": e.state["purchase_id"],
+                        "duplicate": True,
+                        "purchase_id_conflict": e.conflict,
+                    }
                 except ReservationError as e:
                     final_action = "DENY"
                     decision.layer = "budget"
+                    decision.reasons.append(str(e))
+                except ValueError as e:
+                    final_action = "INDETERMINATE"
+                    decision.layer = "input"
                     decision.reasons.append(str(e))
             else:
                 self._spent[spent_key] = spent + intent.amount
@@ -220,13 +244,14 @@ class Gateway:
         return self._finalize(decision, final_action, human_said, intent,
                               agent_id, owner, policy_refs, spent, today,
                               mandate_id=mandate_id, challenge=challenge,
-                              reservation=reservation)
+                              reservation=reservation, purchase_id=purchase_id)
 
     # ---- 收尾：计账 + 审计 + 返回 ------------------------------------
     def _finalize(self, decision: Decision, final_action: str, human_said,
                   intent: PaymentIntent, agent_id, owner, policy_refs,
                   spent: float, today: str, mandate_id=None, challenge=None,
-                  reservation: dict | None = None) -> dict:
+                  reservation: dict | None = None,
+                  purchase_id: str | None = None) -> dict:
         record_intent = {"amount": intent.amount, "recipient": intent.recipient,
                          "purpose": intent.purpose}
         optional_intent = {
@@ -248,8 +273,10 @@ class Gateway:
             "reasons": decision.reasons,
             "policy_refs": policy_refs,
             "mandate_id": mandate_id,
+            "purchase_id": purchase_id,
             "evaluation_id": (reservation or {}).get("evaluation_id"),
             "reservation_status": (reservation or {}).get("reservation_status"),
+            "duplicate": (reservation or {}).get("duplicate", False),
             "spent_today_after": round(self.spent_today(owner), 6),
         }
         with AUDIT_LOG.open("a", encoding="utf-8") as f:
@@ -260,16 +287,21 @@ class Gateway:
                "human": human_said, "audit_id": record["id"],
                "policy_refs": policy_refs, "mandate_id": mandate_id,
                "spent_today": record["spent_today_after"]}
+        if purchase_id is not None:
+            out["purchase_id"] = purchase_id
         if reservation:
             out.update({"evaluation_id": reservation["evaluation_id"],
                         "reservation_status": reservation["reservation_status"],
                         "reservation_expires_at": reservation["reservation_expires_at"]})
+            if reservation.get("duplicate"):
+                out["duplicate"] = True
+                out["purchase_id_conflict"] = reservation["purchase_id_conflict"]
         if challenge:
             out["challenge"] = challenge   # ASK：交用户签名的 challenge
         if self.verdict_signer is not None:
             # 平台签名凭证：任何第三方可离线验证这个判定确实发生
             out["credential"] = self.verdict_signer.sign(out, record["intent"], owner)
-        if reservation:
+        if reservation and reservation.get("reservation_token"):
             # Secret capability token stays outside the signed/public credential and audit log.
             out["reservation_token"] = reservation["reservation_token"]
         return out

@@ -17,13 +17,17 @@ test("evaluate sends owner and exact expectations, then settles", async () => {
     return new Response(JSON.stringify({ id: "e1", status: "settled" }), { status: 200 });
   };
   const client = new BoundraClient({ baseUrl: "https://api.test", owner: "0xowner", agentId: "bot", fetch: mockFetch });
-  const verdict = await client.evaluate({ amount: 0.003, recipient: "0xabc", purpose: "data", expected_amount: 0.003 });
+  const verdict = await client.evaluate(
+    { amount: 0.003, recipient: "0xabc", purpose: "data", expected_amount: 0.003 },
+    { purchaseId: "purchase-a" },
+  );
   assert.equal(verdict.decision, "ALLOW");
   const state = await client.settle("e1", "private-token", "0xhash");
   assert.equal(state.status, "settled");
   const body = JSON.parse(calls[0].init.body);
   assert.equal(body.owner, "0xowner");
   assert.equal(body.intent.expected_amount, 0.003);
+  assert.equal(body.purchase_id, "purchase-a");
 });
 
 test("ALLOW permits x402 hook, DENY and network failures abort", async () => {
